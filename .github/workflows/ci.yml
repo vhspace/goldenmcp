@@ -24,7 +24,7 @@ jobs:
         with:
           submodules: recursive
       - uses: foundry-rs/foundry-toolchain@v1
-      - run: forge test -C contracts/mcp-registry
+      - run: cd contracts/mcp-registry && forge test
 
   web:
     runs-on: ubuntu-latest
