@@ -1,83 +1,41 @@
-import { CronCapability, HTTPCapability, handler, Runner, type Runtime } from "@chainlink/cre-sdk";
+import { CronCapability, HTTPClient, handler, ok, Runner, text, type Runtime } from "@chainlink/cre-sdk";
+import { runPipeline } from "./pipeline";
+import type { Config } from "./types";
 
-interface Config {
-  schedule: string;
-  evalRunnerUrl: string;
-  walrusAggregatorUrl: string;
-  arcRegistryAddress: string;
-  chainlinkCaiUrl: string;
-}
-
-interface EvalResult {
-  run_id: string;
-  manifest: {
-    mcp: string;
-    capability: string;
-    composite: number;
-    failed: boolean;
-    data_score: number;
-    path_score: number;
-    token_efficiency: number;
-    walrus_manifest_blob_id: string;
-  };
-  walrus_manifest_blob_id: string;
-}
+const httpClient = new HTTPClient();
 
 async function onCronTrigger(runtime: Runtime<Config>): Promise<string> {
   const config = runtime.config;
-  const http = new HTTPCapability();
+  runtime.log("GoldenMCP eval pipeline cron triggered");
 
-  runtime.log.info("GoldenMCP eval pipeline triggered");
-
-  const evalResponse = await http
-    .client()
+  const benchmarksResponse = httpClient
     .sendRequest(runtime, {
-      url: `${config.evalRunnerUrl}/benchmarks`,
+      url: `${config.evalRunnerUrl.replace(/\/$/, "")}/benchmarks`,
       method: "GET",
     })
     .result();
 
-  const benchmarks = JSON.parse(evalResponse.bodyText);
-  runtime.log.info(`Found ${benchmarks.benchmarks?.length ?? 0} benchmarks`);
+  if (!ok(benchmarksResponse)) {
+    throw new Error(
+      `GET /benchmarks failed: HTTP ${benchmarksResponse.statusCode} — ${text(benchmarksResponse)}`,
+    );
+  }
+
+  const benchmarks = JSON.parse(text(benchmarksResponse)) as {
+    benchmarks?: Array<{ mcp: string; capability: string }>;
+  };
+  const items = benchmarks.benchmarks ?? [];
+  runtime.log(`Found ${items.length} benchmarks`);
 
   const results: string[] = [];
-  for (const bench of benchmarks.benchmarks ?? []) {
-    runtime.log.info(`Processing ${bench.mcp}/${bench.capability}`);
-
-    const manifestUrl = `${config.walrusAggregatorUrl}/v1/blobs/latest-${bench.mcp}-${bench.capability}`;
-    try {
-      const walrusResponse = await http
-        .client()
-        .sendRequest(runtime, { url: manifestUrl, method: "GET" })
-        .result();
-
-      const manifest = JSON.parse(walrusResponse.bodyText);
-      runtime.log.info(
-        `Score ${bench.mcp}/${bench.capability}: composite=${manifest.composite} failed=${manifest.failed}`,
-      );
-
-      if (config.chainlinkCaiUrl) {
-        const caiResponse = await http
-          .client()
-          .sendRequest(runtime, {
-            url: config.chainlinkCaiUrl,
-            method: "POST",
-            body: JSON.stringify({
-              eval_summary: manifest,
-              mcp: bench.mcp,
-              capability: bench.capability,
-            }),
-            headers: { "Content-Type": "application/json" },
-          })
-          .result();
-        runtime.log.info(`CAI attestation response: ${caiResponse.statusCode}`);
-      }
-
-      results.push(`${bench.mcp}/${bench.capability}:${manifest.composite}`);
-    } catch (err) {
-      runtime.log.error(`Failed ${bench.mcp}/${bench.capability}: ${err}`);
-      throw err;
-    }
+  for (const bench of items) {
+    runtime.log(`Processing ${bench.mcp}/${bench.capability}`);
+    const result = await runPipeline(runtime, {
+      mcp: bench.mcp,
+      capability: bench.capability,
+      agentId: config.defaultAgentId,
+    });
+    results.push(`${bench.mcp}/${bench.capability}:${result.manifest.composite}`);
   }
 
   return `Pipeline complete: ${results.join(", ")}`;
@@ -92,3 +50,5 @@ export async function main() {
   const runner = await Runner.newRunner<Config>();
   await runner.run(initWorkflow);
 }
+
+export { runPipeline };
