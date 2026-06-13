@@ -39,7 +39,11 @@ HTTP_VENDORS = {
 }
 
 # Vendors whose endpoint uses the MCP SSE transport rather than Streamable-HTTP.
-SSE_VENDORS = {"1inch"}
+# 1inch's official Business MCP (https://api.1inch.com/mcp/protocol) is stateless
+# Streamable-HTTP, so it is NOT here — it goes through the default HTTP path. (An
+# earlier SSE endpoint, api.1inch.dev/mcp/sse, was unusable: no load-balancer
+# session affinity, so the message-POST 400s.)
+SSE_VENDORS: set[str] = set()
 
 
 @dataclass(frozen=True)
@@ -206,28 +210,12 @@ def build_mcp_server(vendor: str, *, require_wallet: bool = False):
         )
 
     cfg = http_mcp_config(vendor)
-    # 1inch's official endpoint speaks the MCP SSE transport (GET .../mcp/sse
-    # returns the event-stream handshake), not Streamable-HTTP — the Streamable
-    # path /mcp 404s (`Cannot POST /mcp`) even WITH a valid Bearer key.
-    #
-    # KNOWN BLOCKER (server-side, not fixable client-side): the SSE handshake's
-    # message-POST leg always fails with HTTP 400
-    #   {"error":"No active SSE session. Connect to /mcp/sse first."}
-    # The GET /mcp/sse stream returns `event: endpoint` ->
-    # `/mcp/messages?sessionId=<uuid>` and authenticates (200), but the
-    # subsequent POST /mcp/messages?sessionId=... is rejected as if no session
-    # exists. Verified with a standalone mcp.client.sse repro (independent of
-    # Inspect): auth header IS sent on the POST (httpx client carries it on both
-    # legs), the relative endpoint resolves correctly to the same origin, the
-    # __cf_bm cookie is replayed, and Accept-header variants make no difference.
-    # A POST with a bogus sessionId (no GET at all) returns the IDENTICAL error,
-    # and 15 rapid POSTs against one live session yield 0 successes across 15
-    # distinct Cloudflare edges. The only client-visible cookie is __cf_bm (bot
-    # management, not affinity), so 1inch's server holds SSE sessions in-memory
-    # per backend instance behind a load balancer with no session affinity —
-    # the message POST cannot be pinned to the instance owning the stream.
-    # This is a 1inch infrastructure defect; the wiring below is correct and
-    # will work once 1inch fixes affinity (or ships a Streamable-HTTP endpoint).
+    # 1inch's official Business MCP is the stateless Streamable-HTTP endpoint
+    # https://api.1inch.com/mcp/protocol (per business.1inch.com AI-integration
+    # docs): POST initialize -> 200, session via the Mcp-Session-Id header. NOTE:
+    # the api.1inch.dev/mcp/sse endpoint is a dead end — its SSE message-POST leg
+    # 400s ("No active SSE session") because that server has no load-balancer
+    # session affinity. Use the .com Streamable-HTTP host. SSE_VENDORS stays empty.
     if vendor in SSE_VENDORS:
         logger.info("%s sse connector url=%s", vendor, cfg.url)
         return mcp_server_sse(url=cfg.url, name=cfg.name, headers=cfg.headers)

@@ -96,43 +96,47 @@ def test_oneinch_http_requires_url(monkeypatch):
 
 
 def test_oneinch_http_includes_bearer_header(monkeypatch):
-    monkeypatch.setenv("ONEINCH_MCP_URL", "https://mcp.1inch.dev/mcp")
+    # The working endpoint is the official Streamable-HTTP host
+    # https://api.1inch.com/mcp/protocol, authenticated with a Bearer key.
+    monkeypatch.setenv("ONEINCH_MCP_URL", "https://api.1inch.com/mcp/protocol")
     monkeypatch.setenv("ONEINCH_API_KEY", "test-key")
     cfg = http_mcp_config("1inch")
-    assert cfg.url == "https://mcp.1inch.dev/mcp"
+    assert cfg.url == "https://api.1inch.com/mcp/protocol"
     assert cfg.headers is not None
     assert cfg.headers["Authorization"] == "Bearer test-key"
 
 
-def test_oneinch_is_sse_vendor():
-    # 1inch's official endpoint only speaks the MCP SSE transport (GET /mcp/sse);
-    # the Streamable-HTTP path /mcp 404s even with a valid Bearer key.
-    assert "1inch" in SSE_VENDORS
+def test_oneinch_is_not_sse_vendor():
+    # 1inch's official Business MCP (api.1inch.com/mcp/protocol) is stateless
+    # Streamable-HTTP, so it routes through the default HTTP path, not SSE. The
+    # old api.1inch.dev/mcp/sse endpoint was a dead end (no session affinity).
+    assert "1inch" not in SSE_VENDORS
+    assert SSE_VENDORS == set()
 
 
-def test_oneinch_build_routes_via_sse_with_bearer(monkeypatch):
-    monkeypatch.setenv("ONEINCH_MCP_URL", "https://api.1inch.dev/mcp/sse")
+def test_oneinch_build_routes_via_http_with_bearer(monkeypatch):
+    monkeypatch.setenv("ONEINCH_MCP_URL", "https://api.1inch.com/mcp/protocol")
     monkeypatch.setenv("ONEINCH_API_KEY", "test-key")
 
     calls: dict[str, dict] = {}
 
-    def fake_sse(**kwargs):
-        calls["sse"] = kwargs
-        return object()
-
-    def fake_http(**kwargs):  # pragma: no cover - asserted not called
+    def fake_http(**kwargs):
         calls["http"] = kwargs
         return object()
 
-    monkeypatch.setattr(mcp_connectors, "mcp_server_sse", fake_sse)
+    def fake_sse(**kwargs):  # pragma: no cover - asserted not called
+        calls["sse"] = kwargs
+        return object()
+
     monkeypatch.setattr(mcp_connectors, "mcp_server_http", fake_http)
+    monkeypatch.setattr(mcp_connectors, "mcp_server_sse", fake_sse)
 
     build_mcp_server("1inch")
 
-    assert "sse" in calls
-    assert "http" not in calls
-    assert calls["sse"]["url"] == "https://api.1inch.dev/mcp/sse"
-    assert calls["sse"]["headers"]["Authorization"] == "Bearer test-key"
+    assert "http" in calls
+    assert "sse" not in calls
+    assert calls["http"]["url"] == "https://api.1inch.com/mcp/protocol"
+    assert calls["http"]["headers"]["Authorization"] == "Bearer test-key"
 
 
 def test_jupiter_stdio_uses_npx_package():
