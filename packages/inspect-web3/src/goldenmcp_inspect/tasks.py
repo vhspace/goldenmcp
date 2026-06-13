@@ -25,8 +25,6 @@ from goldenmcp_inspect.eval_chains import (
     ONEINCH_QUOTE_PROMPT,
     ONEINCH_SWAP_PROMPT,
     SYSTEM_PROMPT,
-    UNISWAP_QUOTE_PROMPT,
-    UNISWAP_SWAP_PROMPT,
 )
 from goldenmcp_inspect.mcp_connectors import build_mcp_server
 from goldenmcp_inspect.schemas import EvalTranscript, TranscriptEvent
@@ -166,16 +164,6 @@ def odos_swap():
         ODOS_SWAP_PROMPT,
         require_wallet=True,
     )
-
-
-@task
-def uniswap_quote():
-    return _build_task("uniswap", "quote", UNISWAP_QUOTE_PROMPT)
-
-
-@task
-def uniswap_swap():
-    return _build_task("uniswap", "swap", UNISWAP_SWAP_PROMPT)
 
 
 @task

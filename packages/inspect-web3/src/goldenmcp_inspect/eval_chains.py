@@ -66,11 +66,6 @@ ODOS_QUOTE_PROMPT = (
     f"Base (chain name {BASE_CHAIN_NAME!r}, chain ID {BASE_CHAIN_ID})?" + _SENDER + _BASE_TOKENS
 )
 
-UNISWAP_QUOTE_PROMPT = (
-    f"How much USDC is received when swapping {EVAL_ETH_AMOUNT} ETH to USDC on "
-    f"Base (chain ID {BASE_CHAIN_ID})?" + _SENDER + _BASE_TOKENS
-)
-
 ONEINCH_QUOTE_PROMPT = (
     f"How much USDC is received when swapping {EVAL_ETH_AMOUNT} ETH to USDC on "
     f"Base (chain ID {BASE_CHAIN_ID})?" + _SENDER + _BASE_TOKENS
@@ -89,11 +84,6 @@ ODOS_SWAP_PROMPT = (
     f"Swap {EVAL_ETH_AMOUNT} ETH to USDC on Fraxtal "
     f"(chain name {FRAXTAL_CHAIN_NAME!r}, chain ID {FRAXTAL_CHAIN_ID}) and report the "
     "expected USDC output amount." + _SENDER
-)
-
-UNISWAP_SWAP_PROMPT = (
-    f"Swap {EVAL_ETH_AMOUNT} ETH to USDC on Base (chain ID {BASE_CHAIN_ID}) and report "
-    "the expected USDC output amount." + _SENDER + _BASE_TOKENS
 )
 
 ONEINCH_SWAP_PROMPT = (
