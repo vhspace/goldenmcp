@@ -8,7 +8,15 @@ import pytest
 
 from goldenmcp_inspect.benchmarks import load_benchmark
 from goldenmcp_inspect.manifest import build_manifest
-from goldenmcp_inspect.pipeline import post_eval_walrus_upload
+from goldenmcp_walrus.testing import InMemoryWalrusClient
+from goldenmcp_walrus.filesystem import WalrusFileSystem
+from goldenmcp_walrus.index import WalrusIndex
+
+from goldenmcp_inspect.pipeline import (
+    post_eval_walrus_upload,
+    publish_manifest_to_walrus,
+    score_transcript_to_manifest,
+)
 from goldenmcp_inspect.schemas import EvalTranscript, TranscriptEvent
 
 
@@ -33,6 +41,48 @@ def test_post_eval_builds_manifest_without_walrus():
     assert manifest.mcp == "lifi"
     assert manifest.capability == "quote"
     assert manifest.composite > 0
+
+
+def test_score_transcript_to_manifest_has_no_walrus_ids():
+    manifest = score_transcript_to_manifest(_sample_transcript(), run_id="score-only")
+    assert manifest.mcp == "lifi"
+    assert manifest.capability == "quote"
+    assert manifest.run_id == "score-only"
+    assert manifest.composite > 0
+    assert manifest.walrus_blob_id is None
+    assert manifest.walrus_manifest_blob_id is None
+
+
+def test_publish_manifest_to_walrus_sets_blob_ids():
+    transcript = _sample_transcript()
+    manifest = score_transcript_to_manifest(transcript, run_id="publish-unit")
+    client = InMemoryWalrusClient()
+    fs = WalrusFileSystem(client=client, index=WalrusIndex())
+
+    result = publish_manifest_to_walrus(
+        manifest,
+        transcript=transcript,
+        walrus=client,
+        filesystem=fs,
+    )
+
+    assert result.manifest.walrus_blob_id
+    assert result.manifest.walrus_manifest_blob_id
+    assert result.walrus_manifest_blob_id == result.manifest.walrus_manifest_blob_id
+    assert result.walrus_eval_blob_id == result.manifest.walrus_blob_id
+
+
+def test_post_eval_walrus_upload_delegates_to_score_and_publish():
+    client = InMemoryWalrusClient()
+    fs = WalrusFileSystem(client=client, index=WalrusIndex())
+    result = post_eval_walrus_upload(
+        _sample_transcript(),
+        run_id="compat-run",
+        walrus=client,
+        filesystem=fs,
+    )
+    assert result.walrus_manifest_blob_id
+    assert result.manifest.walrus_blob_id
 
 
 @pytest.mark.skipif(

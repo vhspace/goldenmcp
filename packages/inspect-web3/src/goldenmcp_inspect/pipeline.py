@@ -15,7 +15,6 @@ from goldenmcp_inspect.manifest import (
     transcript_from_inspect_log,
 )
 from goldenmcp_inspect.schemas import EvalTranscript, ScoreManifest
-from goldenmcp_inspect.scorers import score_transcript
 from goldenmcp_inspect.walrus_paths import inspect_eval_log_path
 from goldenmcp_walrus import WalrusClient, WalrusFileSystem
 
@@ -54,34 +53,40 @@ def upload_inspect_log_bytes(
     return walrus_path, fs
 
 
-def post_eval_walrus_upload(
+def score_transcript_to_manifest(
     transcript: EvalTranscript,
     *,
     run_id: str | None = None,
+) -> ScoreManifest:
+    """Score transcript and build manifest without Walrus upload."""
+    benchmark = load_benchmark(transcript.mcp, transcript.capability)
+    return build_manifest(transcript, benchmark, run_id=run_id)
+
+
+def publish_manifest_to_walrus(
+    manifest: ScoreManifest,
+    *,
+    transcript: EvalTranscript | None = None,
     walrus: WalrusClient | None = None,
     inspect_log_bytes: bytes | None = None,
     inspect_log_path: str | None = None,
     filesystem: WalrusFileSystem | None = None,
 ) -> WalrusUploadResult:
-    """Score transcript, upload Inspect log + score manifest to Walrus."""
-    benchmark = load_benchmark(transcript.mcp, transcript.capability)
-    scores = score_transcript(transcript, benchmark)
-    manifest = build_manifest(transcript, benchmark, run_id=run_id)
-    manifest.failed = scores["failed"]
-    manifest.fail_reason = scores.get("fail_reason")
-    manifest.data_score = scores["data_score"]
-    manifest.path_score = scores["path_score"]
-    manifest.token_efficiency = scores["token_efficiency"]
-    manifest.composite = scores["composite"]
-
+    """Upload Inspect eval log bytes and public manifest JSON to Walrus."""
     eval_walrus_path = inspect_log_path or inspect_eval_log_path(
-        transcript.mcp,
-        transcript.capability,
+        manifest.mcp,
+        manifest.capability,
         run_id=manifest.run_id,
         created_at=manifest.created_at,
     )
 
-    log_bytes = inspect_log_bytes or synthesize_inspect_log_bytes(transcript, manifest)
+    if inspect_log_bytes is not None:
+        log_bytes = inspect_log_bytes
+    elif transcript is not None:
+        log_bytes = synthesize_inspect_log_bytes(transcript, manifest)
+    else:
+        log_bytes = manifest_to_json(manifest).encode()
+
     _, fs = upload_inspect_log_bytes(log_bytes, eval_walrus_path, filesystem=filesystem)
     manifest.walrus_blob_id = eval_walrus_path
 
@@ -90,9 +95,9 @@ def post_eval_walrus_upload(
     manifest_blob_id = manifest.walrus_manifest_blob_id
 
     logger.info(
-        "post_eval_walrus_upload mcp=%s capability=%s manifest_blob=%s eval_path=%s index_blob=%s composite=%.4f failed=%s",
-        transcript.mcp,
-        transcript.capability,
+        "publish_manifest_to_walrus mcp=%s capability=%s manifest_blob=%s eval_path=%s index_blob=%s composite=%.4f failed=%s",
+        manifest.mcp,
+        manifest.capability,
         manifest_blob_id,
         eval_walrus_path,
         fs.index.index_blob_id,
@@ -104,6 +109,27 @@ def post_eval_walrus_upload(
         walrus_manifest_blob_id=manifest_blob_id,
         walrus_eval_blob_id=eval_walrus_path,
         walrus_index_blob_id=fs.index.index_blob_id,
+    )
+
+
+def post_eval_walrus_upload(
+    transcript: EvalTranscript,
+    *,
+    run_id: str | None = None,
+    walrus: WalrusClient | None = None,
+    inspect_log_bytes: bytes | None = None,
+    inspect_log_path: str | None = None,
+    filesystem: WalrusFileSystem | None = None,
+) -> WalrusUploadResult:
+    """Score transcript, upload Inspect log + score manifest to Walrus."""
+    manifest = score_transcript_to_manifest(transcript, run_id=run_id)
+    return publish_manifest_to_walrus(
+        manifest,
+        transcript=transcript,
+        walrus=walrus,
+        inspect_log_bytes=inspect_log_bytes,
+        inspect_log_path=inspect_log_path,
+        filesystem=filesystem,
     )
 
 
