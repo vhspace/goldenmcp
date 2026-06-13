@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fsspec.core
 import pytest
 
 from goldenmcp_walrus.testing import InMemoryWalrusClient
@@ -18,6 +19,13 @@ def walrus_fs() -> WalrusFileSystem:
 
 def test_strip_protocol_is_classmethod():
     assert WalrusFileSystem._strip_protocol("walrus://evals/foo.eval") == "evals/foo.eval"
+
+
+def test_fsspec_url_to_fs_walrus_log_dir():
+    """Inspect View calls fsspec.core.url_to_fs(log_dir) before listing logs."""
+    fs, path = fsspec.core.url_to_fs("walrus://evals/goldenmcp")
+    assert isinstance(fs, WalrusFileSystem)
+    assert path == "evals/goldenmcp"
 
 
 def test_write_then_read_roundtrip(walrus_fs: WalrusFileSystem):
