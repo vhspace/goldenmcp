@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
@@ -13,8 +12,8 @@ logger = logging.getLogger(__name__)
 
 
 def inspect_task_spec(mcp: str, capability: str) -> str:
-    slug = f"{mcp.replace('-', '_')}_{capability.replace('-', '_')}"
-    return f"packages/inspect-web3/src/goldenmcp_inspect/tasks.py@{slug}"
+    """Return Inspect registry task name (matches @task-decorated function in goldenmcp_inspect.tasks)."""
+    return f"{mcp.replace('-', '_')}_{capability.replace('-', '_')}"
 
 
 def run_inspect_eval(
@@ -41,31 +40,31 @@ def run_inspect_eval(
         root,
     )
 
-    prev_cwd = Path.cwd()
-    try:
-        os.chdir(root)
-        eval_logs = eval(
-            tasks=task_spec,
-            model=model,
-            log_dir=str(logs_dir),
-            display="none",
-            log_level="warning",
-        )
-    finally:
-        os.chdir(prev_cwd)
+    eval_logs = eval(
+        tasks=task_spec,
+        model=model,
+        log_dir=str(logs_dir),
+        display="none",
+        log_level="warning",
+    )
 
     if not eval_logs:
         raise RuntimeError("inspect eval returned no logs")
 
     eval_log = eval_logs[0]
-    if eval_log.status == "error":
-        err = eval_log.error
-        message = getattr(err, "message", None) or str(err) if err else "unknown error"
-        raise RuntimeError(f"inspect eval failed: {message}")
+    if eval_log.status != "success":
+        if eval_log.status == "error":
+            err = eval_log.error
+            message = getattr(err, "message", None) or str(err) if err else "unknown error"
+            raise RuntimeError(f"inspect eval failed: {message}")
+        raise RuntimeError(f"inspect eval did not succeed: status={eval_log.status!r}")
 
     log_path = (eval_log.location or "").strip()
+
     if log_path and Path(log_path).is_file():
         log_data, raw = read_inspect_log_file(log_path)
         return log_path, log_data, raw
 
-    return find_inspect_log_for_benchmark(mcp, capability, repo_root=root)
+    log_data = eval_log.model_dump(mode="json")
+    fallback_path, _, raw = find_inspect_log_for_benchmark(mcp, capability, repo_root=root)
+    return fallback_path, log_data, raw
