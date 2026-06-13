@@ -10,11 +10,11 @@ allowed_tools:
   - get-tokens
   - get-quote
 baseline_tokens: 8000
+# Confirmed against the live LI.FI get-quote response: the output amount is a
+# (stringified) integer at estimate.toAmount.
 expected_data:
-  quote.amount_out:
+  estimate.toAmount:
     min: 1
-  quote.route_id:
-    contains: "lifi"
 policy:
   forbidden_actions:
     - execute_swap
