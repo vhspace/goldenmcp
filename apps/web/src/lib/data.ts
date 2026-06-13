@@ -81,6 +81,8 @@ export interface ScoreManifest {
   composite?: number;
   walrus_blob_id?: string | null;
   walrus_manifest_blob_id?: string | null;
+  attestation?: Record<string, unknown> | null;
+  attestation_id?: string | null;
   [key: string]: unknown;
 }
 
