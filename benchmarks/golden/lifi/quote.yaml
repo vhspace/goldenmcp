@@ -1,17 +1,27 @@
+# Tool names confirmed against the live LI.FI MCP (mcp.li.quest/mcp): an agent
+# resolves the token then quotes. `get-token` (singular, one lookup) and
+# `get-tokens` (plural, list) are both real; both are allowed for the read path.
 expected_path:
-  - get-chains
-  - get-tokens
+  - get-token
   - get-quote
 allowed_tools:
   - get-chains
+  - get-chain-by-id
+  - get-chain-by-name
+  - get-token
   - get-tokens
   - get-quote
-baseline_tokens: 8000
+# Token budget (caching disabled). LI.FI's ~20k-token tool schema is re-sent as
+# input on every tool round, so a clean 1-round quote ~= 21-22k tokens and each
+# extra round adds ~17k. Budget = ~2 efficient rounds, so a 1-round run scores
+# ~0.5 and wasteful multi-round runs are penalized. (Other MCPs' baselines are
+# still placeholders pending their own live calibration.)
+baseline_tokens: 45000
+# Confirmed against the live LI.FI get-quote response: the output amount is a
+# (stringified) integer at estimate.toAmount.
 expected_data:
-  quote.amount_out:
+  estimate.toAmount:
     min: 1
-  quote.route_id:
-    contains: "lifi"
 policy:
   forbidden_actions:
     - execute_swap

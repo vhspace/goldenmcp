@@ -109,12 +109,14 @@ def score_data(transcript: EvalTranscript, benchmark: GoldenBenchmark) -> float:
         checks += 1
         actual = _get_nested(output, key.split("."))
         if isinstance(spec, dict):
-            if "min" in spec and isinstance(actual, (int, float)):
-                if actual >= spec["min"]:
+            if "min" in spec:
+                num = _as_number(actual)
+                if num is not None and num >= spec["min"]:
                     passed += 1
                 continue
-            if "max" in spec and isinstance(actual, (int, float)):
-                if actual <= spec["max"]:
+            if "max" in spec:
+                num = _as_number(actual)
+                if num is not None and num <= spec["max"]:
                     passed += 1
                 continue
             if "equals" in spec:
@@ -219,3 +221,17 @@ def _get_nested(data: dict[str, Any], keys: list[str]) -> Any:
             return None
         current = current[key]
     return current
+
+
+def _as_number(value: Any) -> float | None:
+    """Coerce ints/floats and numeric strings to float (DeFi APIs stringify amounts)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None

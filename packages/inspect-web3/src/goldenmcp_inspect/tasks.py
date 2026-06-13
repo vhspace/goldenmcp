@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 
 from inspect_ai import Task, task
 from inspect_ai.dataset import Sample
+from inspect_ai.model import GenerateConfig
 from inspect_ai.scorer import Scorer, Score, scorer
-from inspect_ai.solver import generate, use_tools
+from inspect_ai.solver import generate, system_message, use_tools
 
 from goldenmcp_inspect.benchmarks import load_benchmark
 from goldenmcp_inspect.eval_chains import (
@@ -22,6 +24,7 @@ from goldenmcp_inspect.eval_chains import (
     ODOS_SWAP_PROMPT,
     ONEINCH_QUOTE_PROMPT,
     ONEINCH_SWAP_PROMPT,
+    SYSTEM_PROMPT,
     UNISWAP_QUOTE_PROMPT,
     UNISWAP_SWAP_PROMPT,
 )
@@ -39,14 +42,6 @@ def _parse_json(text: str):
         return None
 
 
-def _usage_tokens(usage) -> int:
-    """Token count from an Inspect ModelUsage, tolerant of which fields are set."""
-    total = getattr(usage, "total_tokens", None)
-    if total:
-        return total
-    return (getattr(usage, "input_tokens", 0) or 0) + (getattr(usage, "output_tokens", 0) or 0)
-
-
 def _make_transcript_scorer(mcp: str, capability: str) -> Scorer:
     benchmark = load_benchmark(mcp, capability)
 
@@ -54,7 +49,6 @@ def _make_transcript_scorer(mcp: str, capability: str) -> Scorer:
     def goldenmcp_scorer() -> Scorer:
         async def score(state, target):
             events = []
-            total_tokens = 0
             structured: dict = {}
             for msg in state.messages:
                 if hasattr(msg, "tool_calls") and msg.tool_calls:
@@ -72,8 +66,10 @@ def _make_transcript_scorer(mcp: str, capability: str) -> Scorer:
                     parsed = _parse_json(getattr(msg, "text", "") or "")
                     if isinstance(parsed, dict):
                         structured.update(parsed)
-                if hasattr(msg, "usage") and msg.usage:
-                    total_tokens += _usage_tokens(msg.usage)
+
+            # Cumulative tokens for the sample live on TaskState (sample.model_usage),
+            # NOT on individual messages — reading per-message usage always yielded 0.
+            total_tokens = getattr(state, "token_usage", 0) or 0
 
             output_text = state.output.completion if state.output else ""
             transcript = EvalTranscript(
@@ -104,12 +100,27 @@ def _build_task(
     return Task(
         dataset=[Sample(input=prompt)],
         solver=[
+            system_message(SYSTEM_PROMPT),
             use_tools(build_mcp_server(mcp, require_wallet=require_wallet)),
             generate(),
         ],
         scorer=_make_transcript_scorer(mcp, capability),
+        config=_generate_config(),
         metadata={"mcp": mcp, "capability": capability, "benchmark": benchmark.model_dump()},
     )
+
+
+def _generate_config() -> GenerateConfig:
+    # Disable Anthropic prompt caching so token_efficiency reflects real usage and
+    # stays comparable across the K=3 providers (no cache-read inflation).
+    cfg = GenerateConfig(cache_prompt=False)
+    # extra_body cannot be set via Inspect's CLI (--model-config / -M route to the
+    # provider constructor), and chat_template_kwargs is rejected (HTTP 400) by the
+    # Anthropic/Mistral endpoints — so it must be applied per-model, in-task, gated
+    # on an env var the runner sets only for the Qwen invocation.
+    if os.environ.get("GOLDENMCP_DISABLE_THINKING") == "1":
+        cfg.extra_body = {"chat_template_kwargs": {"enable_thinking": False}}
+    return cfg
 
 
 @task
