@@ -35,6 +35,12 @@ resource "digitalocean_firewall" "eval_runner" {
 
   inbound_rule {
     protocol         = "tcp"
+    port_range       = "80"
+    source_addresses = var.allowed_https_cidrs
+  }
+
+  inbound_rule {
+    protocol         = "tcp"
     port_range       = "443"
     source_addresses = var.allowed_https_cidrs
   }
