@@ -22,20 +22,8 @@ variable "image" {
   default     = "ubuntu-24-04-x64"
 }
 
-variable "ssh_key_name" {
-  description = "Name for the SSH key resource created in DigitalOcean"
-  type        = string
-  default     = "goldenmcp-eval-runner"
-}
-
-variable "ssh_public_key" {
-  description = "Operator SSH public key contents (e.g. contents of ~/.ssh/id_ed25519.pub)"
-  type        = string
-  sensitive   = true
-}
-
-variable "allowed_ssh_cidrs" {
-  description = "CIDR blocks allowed to SSH (port 22) to the droplet"
+variable "ssh_key_names" {
+  description = "Names of existing DigitalOcean account SSH keys to attach (discovered via doctl or DO API)"
   type        = list(string)
 }
 

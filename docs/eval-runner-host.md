@@ -7,7 +7,7 @@ Deploy the GoldenMCP **eval-runner** on a DigitalOcean droplet so Chainlink CRE 
 - **Droplet:** `s-4vcpu-8gb` in `nyc3` (4 vCPU, 8 GB RAM)
 - **Stack:** Ubuntu 24.04, `uv`, Node.js, nginx TLS `:443` → eval-runner `:8090`
 - **Secrets:** post-provision SSH sync to `/etc/goldenmcp/.env` (not in Terraform state)
-- **Firewall:** SSH (22) from operator IP only; HTTPS (443) public; **8090 not exposed**
+- **Firewall:** SSH (22) and HTTPS (443) open; **8090 not exposed**
 
 See [infra/terraform/eval-runner/README.md](../infra/terraform/eval-runner/README.md) for Terraform details.
 
@@ -16,21 +16,20 @@ See [infra/terraform/eval-runner/README.md](../infra/terraform/eval-runner/READM
 1. [DigitalOcean](https://www.digitalocean.com/) account and API token
 2. Local `.env` with `DO_API_KEY` (copy from `.env.example`)
 3. Terraform `>= 1.14.0`
-4. SSH key pair (`~/.ssh/id_ed25519.pub` or set `TF_VAR_ssh_public_key`)
-5. Your public IP for firewall SSH allowlist
+4. At least one SSH key already registered on your DigitalOcean account
 
 ## One-time setup
 
 ```bash
 cp .env.example .env
 # Edit .env — set DO_API_KEY and eval/MCP secrets
-
-export TF_VAR_allowed_ssh_cidrs='["YOUR_PUBLIC_IP/32"]'
-# Optional if key is not ~/.ssh/id_ed25519.pub:
-# export TF_VAR_ssh_public_key="$(cat ~/.ssh/id_ed25519.pub)"
 ```
 
-Find your public IP: `curl -s https://ifconfig.me`
+The apply script auto-discovers SSH keys from your DO account. To attach specific keys only:
+
+```bash
+export TF_VAR_ssh_key_names='["TAI","chatresearch"]'
+```
 
 ## Provision droplet
 
@@ -44,6 +43,7 @@ Outputs:
 ```bash
 terraform -chdir=infra/terraform/eval-runner output droplet_ip
 terraform -chdir=infra/terraform/eval-runner output health_check_url
+terraform -chdir=infra/terraform/eval-runner output ssh_key_names
 ```
 
 ## Sync application secrets
@@ -121,7 +121,7 @@ The droplet runs Inspect + npx stdio MCPs; CRE calls HTTP only.
 | Symptom | Check |
 |---------|--------|
 | `502` from nginx | `systemctl status goldenmcp-eval-runner`; secrets synced? |
-| SSH refused | `allowed_ssh_cidrs` matches current IP |
+| SSH refused | Use a private key matching an attached DO SSH key (`terraform output ssh_key_names`) |
 | Terraform auth error | `DO_API_KEY` in `.env` |
 | Eval fails on MCP | Re-run sync; verify LLM/MCP keys in `/etc/goldenmcp/.env` on droplet |
 | TLS errors from CRE | Use real cert or configure CRE client to trust self-signed (dev only) |

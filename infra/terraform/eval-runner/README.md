@@ -6,15 +6,15 @@ Provisions an **8 GB RAM** droplet in `nyc3` for the Inspect eval-runner HTTP se
 
 - Terraform `>= 1.14.0` (latest recommended: 1.15.x)
 - `DO_API_KEY` in repo-root `.env` (never commit)
-- SSH key pair for operator access
-- Your public IP for `allowed_ssh_cidrs`
+- At least one SSH key already registered on your DigitalOcean account
 
 ## Quick start
 
 From repo root:
 
 ```bash
-# Plan + apply (exports DIGITALOCEAN_TOKEN from DO_API_KEY)
+# Plan + apply (exports DIGITALOCEAN_TOKEN from DO_API_KEY;
+# auto-attaches all account SSH keys if TF_VAR_ssh_key_names is unset)
 ./scripts/terraform-apply-eval-runner.sh plan
 ./scripts/terraform-apply-eval-runner.sh apply
 
@@ -34,14 +34,22 @@ DigitalOcean Droplets do not have a native secrets vault (unlike App Platform en
 
 ## Configuration
 
-Copy `terraform.tfvars.example` to `terraform.tfvars` and set `allowed_ssh_cidrs`.
-
-Alternatively pass variables:
+The apply script discovers SSH keys from your DO account automatically. To attach a subset, set names explicitly:
 
 ```bash
-export TF_VAR_ssh_public_key="$(cat ~/.ssh/id_ed25519.pub)"
-export TF_VAR_allowed_ssh_cidrs='["203.0.113.10/32"]'
+export TF_VAR_ssh_key_names='["TAI"]'
 ```
+
+List registered keys:
+
+```bash
+doctl compute ssh-key list --format Name,Fingerprint
+# or: curl -H "Authorization: Bearer $DO_API_KEY" https://api.digitalocean.com/v2/account/keys
+```
+
+Copy `terraform.tfvars.example` to `terraform.tfvars` for non-secret overrides (region, droplet size, etc.).
+
+SSH (port 22) is open to the world by default via the droplet firewall — no operator CIDR configuration required.
 
 ## Outputs
 
@@ -50,6 +58,8 @@ export TF_VAR_allowed_ssh_cidrs='["203.0.113.10/32"]'
 | `droplet_ip` | Public IPv4 |
 | `health_check_url` | `https://<ip>/health` |
 | `ssh_command` | SSH as root |
+| `ssh_key_names` | Attached DO SSH key names |
+| `ssh_key_fingerprints` | Attached key fingerprints |
 | `sync_secrets_command` | Hint for secrets sync |
 
 ## CRE integration

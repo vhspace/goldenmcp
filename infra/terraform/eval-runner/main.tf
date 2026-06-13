@@ -1,6 +1,6 @@
-resource "digitalocean_ssh_key" "eval_runner" {
-  name       = var.ssh_key_name
-  public_key = var.ssh_public_key
+data "digitalocean_ssh_key" "operator" {
+  for_each = toset(var.ssh_key_names)
+  name     = each.value
 }
 
 resource "digitalocean_droplet" "eval_runner" {
@@ -8,7 +8,7 @@ resource "digitalocean_droplet" "eval_runner" {
   region   = var.region
   size     = var.droplet_size
   image    = var.image
-  ssh_keys = [digitalocean_ssh_key.eval_runner.fingerprint]
+  ssh_keys = [for k in data.digitalocean_ssh_key.operator : k.fingerprint]
   tags     = var.tags
 
   user_data = templatefile("${path.module}/cloud-init.yaml.tftpl", {
@@ -30,7 +30,7 @@ resource "digitalocean_firewall" "eval_runner" {
   inbound_rule {
     protocol         = "tcp"
     port_range       = "22"
-    source_addresses = var.allowed_ssh_cidrs
+    source_addresses = ["0.0.0.0/0", "::/0"]
   }
 
   inbound_rule {
