@@ -2,11 +2,28 @@
 
 from __future__ import annotations
 
+import base64
+import importlib
+
 import pytest
 from fastapi.testclient import TestClient
 
 from goldenmcp_eval_runner.app import app
+from goldenmcp_eval_runner.pending_runs import cai_callbacks, pending_runs
 from goldenmcp_eval_runner.settings import get_settings
+
+
+def _app_module():
+    return importlib.import_module("goldenmcp_eval_runner.app")
+
+
+@pytest.fixture(autouse=True)
+def clear_stores():
+    pending_runs._runs.clear()
+    cai_callbacks._by_run_id.clear()
+    yield
+    pending_runs._runs.clear()
+    cai_callbacks._by_run_id.clear()
 
 
 @pytest.fixture
@@ -93,17 +110,19 @@ def test_eval_score_returns_manifest_without_walrus(client):
     assert manifest.get("walrus_blob_id") is None
 
 
+def test_eval_publish_rejects_missing_pending_run(client):
+    response = client.post(
+        "/eval/publish",
+        json={"run_id": "unknown-run-id"},
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 404
+
+
 def test_eval_publish_rejects_missing_bearer(client):
     response = client.post(
         "/eval/publish",
-        json={
-            "manifest": {
-                "mcp": "lifi",
-                "capability": "quote",
-                "run_id": "publish-auth",
-                "composite": 0.5,
-            }
-        },
+        json={"run_id": "publish-auth"},
     )
     assert response.status_code == 401
 
@@ -125,6 +144,137 @@ def test_webhooks_cai_accepts_valid_secret(client):
     )
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+    assert response.json()["run_id"] == "run-1"
+
+
+def test_eval_inspect_query_params_backward_compat(client, monkeypatch):
+    """Legacy query-param API still accepted alongside JSON body."""
+    app_module = _app_module()
+
+    captured: dict = {}
+
+    def fake_find(task_name: str):
+        captured["task"] = task_name
+        log_data = {"status": "success", "results": {"samples": []}}
+        raw = b'{"status":"success","results":{"samples":[]}}'
+        return "/tmp/fake.eval", log_data, raw
+
+    def fake_run(*args, **kwargs):
+        import subprocess
+
+        return subprocess.CompletedProcess(args=args[0], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(app_module, "find_inspect_log_for_task", fake_find)
+    monkeypatch.setattr(app_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        app_module,
+        "transcript_from_inspect_log",
+        lambda log_data, mcp, capability: __import__(
+            "goldenmcp_inspect.schemas", fromlist=["EvalTranscript"]
+        ).EvalTranscript(mcp=mcp, capability=capability),
+    )
+
+    response = client.post(
+        "/eval/inspect?mcp=lifi&capability=quote&model=openai/gpt-4o-mini",
+        headers=_auth_headers(),
+    )
+    assert response.status_code == 200
+    assert captured["task"] == "goldenmcp/lifi_quote"
+
+
+def test_eval_inspect_stores_log_bytes_for_publish(client, monkeypatch):
+    app_module = _app_module()
+
+    fake_log = b'{"eval": "raw-log-bytes"}'
+
+    def fake_find(task_name: str):
+        return "/tmp/goldenmcp_lifi_quote.eval", {"status": "success"}, fake_log
+
+    def fake_run(*args, **kwargs):
+        import subprocess
+
+        return subprocess.CompletedProcess(args=args[0], returncode=0, stdout="", stderr="")
+
+    captured: dict = {}
+
+    def fake_publish(manifest, **kwargs):
+        captured["inspect_log_bytes"] = kwargs.get("inspect_log_bytes")
+        captured["inspect_log_path"] = kwargs.get("inspect_log_path")
+        from goldenmcp_inspect.pipeline import WalrusUploadResult
+
+        return WalrusUploadResult(
+            manifest=manifest,
+            walrus_manifest_blob_id="manifest-blob",
+            walrus_eval_blob_id="eval-blob",
+            walrus_index_blob_id="index-blob",
+        )
+
+    monkeypatch.setattr(app_module, "find_inspect_log_for_task", fake_find)
+    monkeypatch.setattr(app_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        app_module,
+        "transcript_from_inspect_log",
+        lambda log_data, mcp, capability: __import__(
+            "goldenmcp_inspect.schemas", fromlist=["EvalTranscript"]
+        ).EvalTranscript(mcp=mcp, capability=capability),
+    )
+    monkeypatch.setattr(app_module, "publish_manifest_to_walrus", fake_publish)
+
+    inspect_response = client.post(
+        "/eval/inspect",
+        json={"mcp": "lifi", "capability": "quote"},
+        headers=_auth_headers(),
+    )
+    assert inspect_response.status_code == 200
+    run_id = inspect_response.json()["run_id"]
+
+    publish_response = client.post(
+        "/eval/publish",
+        json={"run_id": run_id, "attestation_id": "att-1"},
+        headers=_auth_headers(),
+    )
+    assert publish_response.status_code == 200
+    assert captured["inspect_log_bytes"] == fake_log
+    assert captured["inspect_log_path"] == "/tmp/goldenmcp_lifi_quote.eval"
+
+
+def test_eval_publish_merges_cai_webhook_attestation(client, monkeypatch):
+    app_module = _app_module()
+
+    captured: dict = {}
+
+    def fake_publish(manifest, **kwargs):
+        captured["attestation_id"] = manifest.attestation_id
+        from goldenmcp_inspect.pipeline import WalrusUploadResult
+
+        return WalrusUploadResult(
+            manifest=manifest,
+            walrus_manifest_blob_id="m",
+            walrus_eval_blob_id="e",
+        )
+
+    monkeypatch.setattr(app_module, "publish_manifest_to_walrus", fake_publish)
+
+    score_response = client.post(
+        "/eval/score",
+        json={"mcp": "lifi", "capability": "quote", "transcript": _sample_transcript_payload()},
+        headers=_auth_headers(),
+    )
+    run_id = score_response.json()["run_id"]
+
+    client.post(
+        "/webhooks/cai",
+        json={"input": {"run_id": run_id, "attestation_id": "from-cai", "attestation_tx_hash": "0xabc"}},
+        headers={"X-CAI-Webhook-Secret": "test-cai-secret"},
+    )
+
+    publish_response = client.post(
+        "/eval/publish",
+        json={"run_id": run_id},
+        headers=_auth_headers(),
+    )
+    assert publish_response.status_code == 200
+    assert captured["attestation_id"] == "from-cai"
 
 
 @pytest.mark.skipif(
@@ -155,12 +305,12 @@ def test_eval_publish_integration(client):
         json={"mcp": "lifi", "capability": "quote", "transcript": _sample_transcript_payload()},
         headers=_auth_headers(),
     )
-    manifest = score_response.json()["manifest"]
+    run_id = score_response.json()["run_id"]
 
     publish_response = client.post(
         "/eval/publish",
         json={
-            "manifest": manifest,
+            "run_id": run_id,
             "attestation_id": "attest-test",
             "attestation_tx_hash": "0xdead",
         },
@@ -172,3 +322,42 @@ def test_eval_publish_integration(client):
     assert body["walrus_eval_blob_id"]
     assert body["manifest"]["attestation_id"] == "attest-test"
     assert body["manifest"]["attestation_tx_hash"] == "0xdead"
+
+
+def test_eval_publish_legacy_manifest_with_log_bytes(client, monkeypatch):
+    app_module = _app_module()
+
+    captured: dict = {}
+
+    def fake_publish(manifest, **kwargs):
+        captured["inspect_log_bytes"] = kwargs.get("inspect_log_bytes")
+        from goldenmcp_inspect.pipeline import WalrusUploadResult
+
+        return WalrusUploadResult(
+            manifest=manifest,
+            walrus_manifest_blob_id="m",
+            walrus_eval_blob_id="e",
+        )
+
+    monkeypatch.setattr(app_module, "publish_manifest_to_walrus", fake_publish)
+
+    raw = b'{"legacy": true}'
+    score_response = client.post(
+        "/eval/score",
+        json={"mcp": "lifi", "capability": "quote", "transcript": _sample_transcript_payload()},
+        headers=_auth_headers(),
+    )
+    run_id = score_response.json()["run_id"]
+    pending_runs.pop(run_id)
+
+    publish_response = client.post(
+        "/eval/publish",
+        json={
+            "run_id": run_id,
+            "manifest": score_response.json()["manifest"],
+            "inspect_log_bytes_b64": base64.b64encode(raw).decode(),
+        },
+        headers=_auth_headers(),
+    )
+    assert publish_response.status_code == 200
+    assert captured["inspect_log_bytes"] == raw

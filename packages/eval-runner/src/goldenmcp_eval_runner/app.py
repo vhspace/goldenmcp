@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
-import json
+import base64
 import logging
 import subprocess
 import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Body, Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from goldenmcp_eval_runner.auth import require_api_key, require_cai_webhook_secret
+from goldenmcp_eval_runner.inspect_logs import find_inspect_log_for_task
+from goldenmcp_eval_runner.pending_runs import PendingRun, cai_callbacks, pending_runs
 from goldenmcp_eval_runner.settings import RunnerSettings, get_settings
 from goldenmcp_inspect.benchmarks import list_benchmarks, load_benchmark
 from goldenmcp_inspect.manifest import transcript_from_inspect_log
@@ -25,9 +27,6 @@ from goldenmcp_inspect.schemas import EvalTranscript, ScoreManifest, TranscriptE
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# In-memory CAI callback store for publish flow polling (minimal viable).
-_cai_callbacks: list[dict[str, Any]] = []
 
 
 class EvalRequest(BaseModel):
@@ -63,9 +62,11 @@ class EvalResponse(BaseModel):
 
 
 class PublishRequest(BaseModel):
-    manifest: dict[str, Any]
+    run_id: str
     attestation_id: str | None = None
     attestation_tx_hash: str | None = None
+    manifest: dict[str, Any] | None = None
+    inspect_log_bytes_b64: str | None = None
 
 
 class PublishResponse(BaseModel):
@@ -90,6 +91,13 @@ def _repo_root() -> Path:
     return Path.cwd()
 
 
+def _load_benchmark_or_404(mcp: str, capability: str) -> None:
+    try:
+        load_benchmark(mcp, capability)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 def _transcript_from_request(mcp: str, capability: str, transcript_data: dict[str, Any]) -> EvalTranscript:
     events = [TranscriptEvent(**e) for e in transcript_data.get("events", [])]
     return EvalTranscript(
@@ -105,29 +113,41 @@ def _manifest_from_dict(data: dict[str, Any]) -> ScoreManifest:
     return ScoreManifest(**data)
 
 
-def _read_latest_inspect_log(task_name: str) -> tuple[dict[str, Any], bytes]:
-    from inspect_ai.log import list_eval_logs, read_eval_log
+def _apply_attestation(
+    manifest: ScoreManifest,
+    *,
+    attestation_id: str | None,
+    attestation_tx_hash: str | None,
+    cai_input: dict[str, Any] | None,
+) -> None:
+    if attestation_id is not None:
+        manifest.attestation_id = attestation_id or None
+    elif cai_input and cai_input.get("attestation_id") is not None:
+        manifest.attestation_id = cai_input.get("attestation_id")
 
-    logs = list_eval_logs()
-    if not logs:
-        raise HTTPException(status_code=500, detail="inspect eval produced no log files")
+    if attestation_tx_hash is not None:
+        manifest.attestation_tx_hash = attestation_tx_hash or None
+    elif cai_input and cai_input.get("attestation_tx_hash") is not None:
+        manifest.attestation_tx_hash = cai_input.get("attestation_tx_hash")
 
-    task_slug = task_name.replace("/", "_")
-    matching = [log for log in logs if task_slug in log.name]
-    log_info = matching[0] if matching else logs[0]
-    log_path = log_info.name
 
-    logger.info("reading inspect log path=%s task=%s", log_path, task_name)
-
-    if log_path.endswith(".json"):
-        raw = Path(log_path).read_bytes()
-        log_data = json.loads(raw.decode())
-    else:
-        eval_log = read_eval_log(log_path)
-        log_data = json.loads(json.dumps(eval_log.model_dump(mode="json")))
-        raw = Path(log_path).read_bytes()
-
-    return log_data, raw
+def _store_pending_run(
+    run_id: str,
+    manifest: ScoreManifest,
+    *,
+    transcript: EvalTranscript | None = None,
+    inspect_log_bytes: bytes | None = None,
+    inspect_log_path: str | None = None,
+) -> None:
+    pending_runs.put(
+        run_id,
+        PendingRun(
+            manifest=manifest,
+            transcript=transcript,
+            inspect_log_bytes=inspect_log_bytes,
+            inspect_log_path=inspect_log_path,
+        ),
+    )
 
 
 @app.get("/health")
@@ -152,10 +172,7 @@ def run_eval(request: EvalRequest):
     run_id = str(uuid.uuid4())
     logger.info("eval request mcp=%s capability=%s run_id=%s", request.mcp, request.capability, run_id)
 
-    try:
-        load_benchmark(request.mcp, request.capability)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    _load_benchmark_or_404(request.mcp, request.capability)
 
     if not request.transcript:
         raise HTTPException(
@@ -182,14 +199,12 @@ def run_eval(request: EvalRequest):
 )
 def score_eval(request: ScoreRequest):
     """Score an existing transcript JSON without Walrus upload."""
-    try:
-        load_benchmark(request.mcp, request.capability)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    _load_benchmark_or_404(request.mcp, request.capability)
 
     transcript = _transcript_from_request(request.mcp, request.capability, request.transcript)
     run_id = request.run_id or str(uuid.uuid4())
     manifest = score_transcript_to_manifest(transcript, run_id=run_id)
+    _store_pending_run(run_id, manifest, transcript=transcript)
     logger.info(
         "eval/score mcp=%s capability=%s run_id=%s composite=%.4f",
         request.mcp,
@@ -205,12 +220,29 @@ def score_eval(request: ScoreRequest):
     response_model=ScoreResponse,
     dependencies=[Depends(require_api_key)],
 )
-def trigger_inspect_eval(request: InspectEvalRequest, settings: RunnerSettings = Depends(get_settings)):
+def trigger_inspect_eval(
+    body: InspectEvalRequest | None = Body(None),
+    mcp: str | None = Query(None),
+    capability: str | None = Query(None),
+    model: str | None = Query(None),
+    settings: RunnerSettings = Depends(get_settings),
+):
     """Run real Inspect subprocess, score transcript, return manifest without Walrus."""
-    try:
-        load_benchmark(request.mcp, request.capability)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if body is not None:
+        request = body
+    elif mcp and capability:
+        request = InspectEvalRequest(
+            mcp=mcp,
+            capability=capability,
+            model=model or "openai/gpt-4o-mini",
+        )
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="JSON body or query params mcp+capability required",
+        )
+
+    _load_benchmark_or_404(request.mcp, request.capability)
 
     task_name = f"goldenmcp/{request.mcp}_{request.capability}".replace("-", "_")
     cmd = ["uv", "run", "inspect", "eval", task_name, "--model", request.model]
@@ -250,18 +282,32 @@ def trigger_inspect_eval(request: InspectEvalRequest, settings: RunnerSettings =
         )
         raise HTTPException(
             status_code=500,
-            detail=f"inspect eval failed (exit {result.returncode}): {result.stderr}",
+            detail=f"inspect eval failed (exit {result.returncode})",
         )
 
-    log_data, _ = _read_latest_inspect_log(task_name)
+    try:
+        log_path, log_data, raw = find_inspect_log_for_task(task_name)
+    except FileNotFoundError as exc:
+        logger.error("inspect log lookup failed task=%s error=%s", task_name, exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     transcript = transcript_from_inspect_log(log_data, request.mcp, request.capability)
     run_id = str(uuid.uuid4())
     manifest = score_transcript_to_manifest(transcript, run_id=run_id)
+    _store_pending_run(
+        run_id,
+        manifest,
+        transcript=transcript,
+        inspect_log_bytes=raw,
+        inspect_log_path=log_path,
+    )
     logger.info(
-        "eval/inspect scored mcp=%s capability=%s run_id=%s composite=%.4f",
+        "eval/inspect scored mcp=%s capability=%s run_id=%s log_path=%s log_bytes=%d composite=%.4f",
         request.mcp,
         request.capability,
         run_id,
+        log_path,
+        len(raw),
         manifest.composite,
     )
     return ScoreResponse(run_id=run_id, manifest=manifest.to_public_dict())
@@ -273,15 +319,53 @@ def trigger_inspect_eval(request: InspectEvalRequest, settings: RunnerSettings =
     dependencies=[Depends(require_api_key)],
 )
 def publish_eval(request: PublishRequest):
-    """Upload scored manifest to Walrus after attestation."""
-    manifest = _manifest_from_dict(request.manifest)
-    if request.attestation_id:
-        manifest.attestation_id = request.attestation_id
-    if request.attestation_tx_hash:
-        manifest.attestation_tx_hash = request.attestation_tx_hash
+    """Upload scored manifest to Walrus after attestation (uses pending run store)."""
+    pending = pending_runs.pop(request.run_id)
+    cai_input = cai_callbacks.pop(request.run_id)
 
-    transcript = EvalTranscript(mcp=manifest.mcp, capability=manifest.capability)
-    result = publish_manifest_to_walrus(manifest, transcript=transcript)
+    if pending is not None:
+        manifest = pending.manifest.model_copy(deep=True)
+        inspect_log_bytes = pending.inspect_log_bytes
+        transcript = pending.transcript
+        inspect_log_path = pending.inspect_log_path
+    elif request.manifest is not None:
+        manifest = _manifest_from_dict(request.manifest)
+        if manifest.run_id != request.run_id:
+            raise HTTPException(
+                status_code=400,
+                detail="manifest.run_id must match request run_id when no pending run exists",
+            )
+        transcript = None
+        inspect_log_path = None
+        inspect_log_bytes = None
+        if request.inspect_log_bytes_b64:
+            try:
+                inspect_log_bytes = base64.b64decode(request.inspect_log_bytes_b64)
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail="invalid inspect_log_bytes_b64") from exc
+        logger.warning(
+            "eval/publish using client-supplied manifest run_id=%s (no pending run) — prefer score/inspect first",
+            request.run_id,
+        )
+    else:
+        raise HTTPException(
+            status_code=404,
+            detail=f"no pending run for run_id={request.run_id!r} — call /eval/score or /eval/inspect first",
+        )
+
+    _apply_attestation(
+        manifest,
+        attestation_id=request.attestation_id,
+        attestation_tx_hash=request.attestation_tx_hash,
+        cai_input=cai_input,
+    )
+
+    result = publish_manifest_to_walrus(
+        manifest,
+        transcript=transcript,
+        inspect_log_bytes=inspect_log_bytes,
+        inspect_log_path=inspect_log_path,
+    )
 
     return PublishResponse(
         run_id=manifest.run_id,
@@ -297,11 +381,22 @@ def publish_eval(request: PublishRequest):
     dependencies=[Depends(require_cai_webhook_secret)],
 )
 def cai_webhook(body: CaiWebhookBody):
-    """Receive Chainlink CAI cre_callback POST and store for publish flow."""
-    payload = {"input": body.input}
-    _cai_callbacks.append(payload)
-    logger.info("cai webhook received callbacks_stored=%d input_keys=%s", len(_cai_callbacks), list(body.input.keys()))
-    return {"status": "ok", "stored": len(_cai_callbacks)}
+    """Receive Chainlink CAI cre_callback POST; store attestation by run_id for publish."""
+    run_id = cai_callbacks.put(body.input)
+    if run_id:
+        logger.info(
+            "cai webhook stored run_id=%s callbacks_stored=%d input_keys=%s",
+            run_id,
+            len(cai_callbacks),
+            list(body.input.keys()),
+        )
+    else:
+        logger.warning(
+            "cai webhook missing run_id in input — not stored callbacks_stored=%d keys=%s",
+            len(cai_callbacks),
+            list(body.input.keys()),
+        )
+    return {"status": "ok", "run_id": run_id, "stored": len(cai_callbacks)}
 
 
 def main():

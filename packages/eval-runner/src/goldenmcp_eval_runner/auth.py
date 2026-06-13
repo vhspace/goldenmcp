@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import secrets
+
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from goldenmcp_eval_runner.settings import RunnerSettings, get_settings
 
 _bearer = HTTPBearer(auto_error=False)
+
+
+def _constant_time_equal(provided: str | None, expected: str) -> bool:
+    if provided is None:
+        return False
+    return secrets.compare_digest(provided.encode(), expected.encode())
 
 
 def require_api_key(
@@ -23,7 +31,7 @@ def require_api_key(
         )
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(status_code=401, detail="Authorization Bearer token required")
-    if credentials.credentials != expected:
+    if not _constant_time_equal(credentials.credentials, expected):
         raise HTTPException(status_code=401, detail="Invalid Authorization Bearer token")
 
 
@@ -45,7 +53,7 @@ def require_cai_webhook_secret(
     if auth_header and auth_header.lower().startswith("bearer "):
         bearer_secret = auth_header[7:].strip()
 
-    if header_secret == expected or bearer_secret == expected:
+    if _constant_time_equal(header_secret, expected) or _constant_time_equal(bearer_secret, expected):
         return
 
     raise HTTPException(status_code=401, detail="Invalid CAI webhook secret")
