@@ -123,8 +123,8 @@ export function parseCaiAttestation(status: CaiStatus, fallbackModel = "gemma4")
 }
 
 function runtimeSleep(runtime: Runtime<Config>, ms: number): void {
-  // cre workflow simulate (v1.18) traps on runtime.sleep(); useScoreOnly marks simulate config.
-  if (runtime.config.useScoreOnly) {
+  // cre workflow simulate (v1.18) traps on runtime.sleep(); busy-wait for simulate targets.
+  if (runtime.config.useScoreOnly || runtime.config.pollBusyWait) {
     const deadline = runtime.now().getTime() + ms;
     while (runtime.now().getTime() < deadline) {
       // busy-wait between poll attempts in local simulate only

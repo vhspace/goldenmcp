@@ -34,25 +34,52 @@ case "${ACTION}" in
     ;;
 esac
 
-if [[ -z "${TF_VAR_ssh_public_key:-}" ]]; then
-  for key in "${HOME}/.ssh/id_ed25519.pub" "${HOME}/.ssh/id_rsa.pub"; do
-    if [[ -f "${key}" ]]; then
-      export TF_VAR_ssh_public_key
-      TF_VAR_ssh_public_key="$(cat "${key}")"
-      echo "Using SSH public key: ${key}"
-      break
-    fi
-  done
-fi
+ensure_operator_ssh_key() {
+  local pubkey_path="${HOME}/.ssh/id_ed25519.pub"
+  local key_name="ballew-ed25519"
+  if [[ ! -f "${pubkey_path}" ]]; then
+    echo "ERROR: missing ${pubkey_path}" >&2
+    exit 1
+  fi
+  local pubkey
+  pubkey="$(cat "${pubkey_path}")"
+  local response
+  response="$(curl -sf \
+    -H "Authorization: Bearer ${DO_API_KEY}" \
+    -H "Content-Type: application/json" \
+    "https://api.digitalocean.com/v2/account/keys")" || {
+    echo "ERROR: failed to list DigitalOcean SSH keys via API" >&2
+    exit 1
+  }
+  local existing_name
+  existing_name="$(python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+pubkey = sys.argv[1]
+for k in data.get("ssh_keys", []):
+    if k.get("public_key", "").strip() == pubkey.strip():
+        print(k["name"])
+        break
+' "${pubkey}" <<<"${response}")"
+  if [[ -n "${existing_name}" ]]; then
+    echo "DigitalOcean SSH key already registered: ${existing_name}" >&2
+    echo "${existing_name}"
+    return 0
+  fi
+  echo "Uploading ${pubkey_path} to DigitalOcean as ${key_name}..." >&2
+  curl -sf -X POST \
+    -H "Authorization: Bearer ${DO_API_KEY}" \
+    -H "Content-Type: application/json" \
+    -d "$(python3 -c 'import json,sys; print(json.dumps({"name":sys.argv[1],"public_key":sys.argv[2]}))' "${key_name}" "${pubkey}")" \
+    "https://api.digitalocean.com/v2/account/keys" >/dev/null
+  echo "${key_name}"
+}
 
-if [[ -z "${TF_VAR_ssh_public_key:-}" ]]; then
-  echo "ERROR: set TF_VAR_ssh_public_key or install ~/.ssh/id_ed25519.pub" >&2
-  exit 1
-fi
-
-if [[ -z "${TF_VAR_allowed_ssh_cidrs:-}" ]]; then
-  echo "ERROR: set TF_VAR_allowed_ssh_cidrs, e.g. export TF_VAR_allowed_ssh_cidrs='[\"203.0.113.10/32\"]'" >&2
-  exit 1
+if [[ -z "${TF_VAR_ssh_key_names:-}" ]]; then
+  KEY_NAME="$(ensure_operator_ssh_key)"
+  export TF_VAR_ssh_key_names
+  TF_VAR_ssh_key_names="$(python3 -c 'import json,sys; print(json.dumps([sys.argv[1]]))' "${KEY_NAME}")"
+  echo "Using DigitalOcean SSH key: ${TF_VAR_ssh_key_names}"
 fi
 
 cd "${TF_DIR}"
@@ -75,4 +102,8 @@ if [[ "${ACTION}" == "output" ]]; then
   exit 0
 fi
 
-terraform "${ACTION}" -input=false
+if [[ "${ACTION}" == "apply" ]]; then
+  terraform apply -input=false -auto-approve
+else
+  terraform "${ACTION}" -input=false
+fi

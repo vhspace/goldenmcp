@@ -7,6 +7,15 @@ staging-simulate:
     config-path: ./config.staging-simulate.json
     secrets-path: ./secrets.yaml
 
+# Remote DO eval-runner: real Inspect on lifi/quote, CAI/Arc skipped until configured.
+staging-do:
+  user-workflow:
+    workflow-name: goldenmcp-eval-pipeline
+  workflow-artifacts:
+    workflow-path: ./src/workflow.ts
+    config-path: ./config.staging-do.json
+    secrets-path: ./secrets.yaml
+
 # Production-like staging (CAI URL set — requires CHAINLINK_CAI_API_KEY secret).
 staging-settings:
   user-workflow:

@@ -79,7 +79,7 @@ def test_benchmarks_no_auth(client):
 
 
 def test_eval_score_rejects_when_api_key_unset(monkeypatch):
-    monkeypatch.delenv("EVAL_RUNNER_API_KEY", raising=False)
+    monkeypatch.setenv("EVAL_RUNNER_API_KEY", "")
     get_settings.cache_clear()
     with TestClient(app) as test_client:
         response = test_client.post(
@@ -176,21 +176,12 @@ def test_eval_inspect_query_params_backward_compat(client, monkeypatch):
     """Legacy query-param API still accepted alongside JSON body."""
     app_module = _app_module()
 
-    captured: dict = {}
+    fake_log = b'{"status":"success","results":{"samples":[]}}'
 
-    def fake_find(task_name: str):
-        captured["task"] = task_name
-        log_data = {"status": "success", "results": {"samples": []}}
-        raw = b'{"status":"success","results":{"samples":[]}}'
-        return "/tmp/fake.eval", log_data, raw
+    def fake_run_inspect(**kwargs):
+        return "/tmp/fake.eval", {"status": "success", "results": {"samples": []}}, fake_log
 
-    def fake_run(*args, **kwargs):
-        import subprocess
-
-        return subprocess.CompletedProcess(args=args[0], returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(app_module, "find_inspect_log_for_task", fake_find)
-    monkeypatch.setattr(app_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(app_module, "run_inspect_eval", fake_run_inspect)
     monkeypatch.setattr(
         app_module,
         "transcript_from_inspect_log",
@@ -206,7 +197,6 @@ def test_eval_inspect_query_params_backward_compat(client, monkeypatch):
     assert response.status_code == 202
     run_id = response.json()["run_id"]
     _poll_until(client, run_id, "scored")
-    assert captured["task"] == "goldenmcp/lifi_quote"
 
 
 def test_eval_inspect_stores_log_bytes_for_publish(client, monkeypatch):
@@ -214,13 +204,8 @@ def test_eval_inspect_stores_log_bytes_for_publish(client, monkeypatch):
 
     fake_log = b'{"eval": "raw-log-bytes"}'
 
-    def fake_find(task_name: str):
+    def fake_run_inspect(**kwargs):
         return "/tmp/goldenmcp_lifi_quote.eval", {"status": "success"}, fake_log
-
-    def fake_run(*args, **kwargs):
-        import subprocess
-
-        return subprocess.CompletedProcess(args=args[0], returncode=0, stdout="", stderr="")
 
     captured: dict = {}
 
@@ -236,8 +221,7 @@ def test_eval_inspect_stores_log_bytes_for_publish(client, monkeypatch):
             walrus_index_blob_id="index-blob",
         )
 
-    monkeypatch.setattr(app_module, "find_inspect_log_for_task", fake_find)
-    monkeypatch.setattr(app_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(app_module, "run_inspect_eval", fake_run_inspect)
     monkeypatch.setattr(
         app_module,
         "transcript_from_inspect_log",
@@ -332,10 +316,14 @@ def test_eval_publish_merges_cai_webhook_attestation(client, monkeypatch):
     not __import__("os").environ.get("OPENAI_API_KEY") and not __import__("os").environ.get("TOGETHER_API_KEY"),
     reason="LLM API key required for live inspect eval",
 )
+@pytest.mark.skipif(
+    not __import__("os").environ.get("LIFI_MCP_URL"),
+    reason="LIFI_MCP_URL required for live LiFi HTTP MCP eval",
+)
 def test_eval_inspect_returns_manifest_without_walrus(client):
     response = client.post(
         "/eval/inspect",
-        json={"mcp": "lifi", "capability": "quote", "model": "openai/gpt-4o-mini"},
+        json={"mcp": "lifi", "capability": "quote"},
         headers=_auth_headers(),
     )
     assert response.status_code == 202

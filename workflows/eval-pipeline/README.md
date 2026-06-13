@@ -38,6 +38,16 @@ For full pipeline including CAI, use **`staging-settings`** and set both:
 - `chainlinkCaiUrl` (already set in yaml)
 - `CHAINLINK_CAI_API_KEY_VAR` in environment / secrets
 
+Remote DigitalOcean eval-runner (real Inspect on `lifi/quote`, CAI/Arc skipped):
+
+```bash
+./scripts/sync-eval-runner-secrets.sh <droplet_ip>
+export EVAL_RUNNER_API_KEY_VAR="$EVAL_RUNNER_API_KEY"   # from sync output or .env
+cre workflow simulate eval-pipeline --target staging-do --timeout 900s --limits none
+```
+
+Run `cre workflow simulate` from the repo root (directory containing `project.yaml`).
+
 Secrets (see `secrets.yaml`):
 
 - `EVAL_RUNNER_API_KEY_VAR` — bearer token for eval-runner

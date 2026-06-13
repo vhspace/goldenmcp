@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import base64
+import concurrent.futures
 import logging
-import subprocess
 import threading
 import uuid
 from pathlib import Path
@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from goldenmcp_eval_runner.auth import require_api_key, require_cai_webhook_secret
-from goldenmcp_eval_runner.inspect_logs import find_inspect_log_for_task
+from goldenmcp_eval_runner.inspect_runner import run_inspect_eval
 from goldenmcp_eval_runner.jobs import EvalJob, eval_jobs, JobStatus
 from goldenmcp_eval_runner.pending_runs import cai_callbacks
 from goldenmcp_eval_runner.settings import RunnerSettings, get_settings
@@ -48,7 +48,7 @@ class ScoreRequest(BaseModel):
 class InspectEvalRequest(BaseModel):
     mcp: str
     capability: str
-    model: str = "openai/gpt-4o-mini"
+    model: str | None = None
 
 
 class ScoreResponse(BaseModel):
@@ -185,59 +185,60 @@ def _fail_job(run_id: str, error: str) -> None:
 
 def _run_inspect_job(run_id: str, request: InspectEvalRequest, settings: RunnerSettings) -> None:
     eval_jobs.update(run_id, status=JobStatus.RUNNING)
-    task_name = f"goldenmcp/{request.mcp}_{request.capability}".replace("-", "_")
-    cmd = ["uv", "run", "inspect", "eval", task_name, "--model", request.model]
-    cwd = _repo_root()
+    model = request.model or settings.eval_inspect_model
+    repo_root = _repo_root()
+    log_dir = repo_root / "logs"
     logger.info(
-        "background inspect cwd=%s cmd=%s timeout=%s run_id=%s",
-        cwd,
-        " ".join(cmd),
+        "background in-process inspect mcp=%s capability=%s model=%s timeout=%s run_id=%s",
+        request.mcp,
+        request.capability,
+        model,
         settings.eval_inspect_timeout,
         run_id,
     )
 
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            cwd=cwd,
-            timeout=settings.eval_inspect_timeout,
-        )
-    except subprocess.TimeoutExpired as exc:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                run_inspect_eval,
+                mcp=request.mcp,
+                capability=request.capability,
+                model=model,
+                repo_root=repo_root,
+                log_dir=log_dir,
+            )
+            log_path, log_data, raw = future.result(timeout=settings.eval_inspect_timeout)
+    except concurrent.futures.TimeoutError:
         logger.error(
-            "inspect eval timed out after %ss mcp=%s capability=%s run_id=%s stdout=%s stderr=%s",
+            "inspect eval timed out after %ss mcp=%s capability=%s run_id=%s",
             settings.eval_inspect_timeout,
             request.mcp,
             request.capability,
             run_id,
-            exc.stdout,
-            exc.stderr,
         )
         _fail_job(
             run_id,
             f"inspect eval timed out after {settings.eval_inspect_timeout}s",
         )
         return
-
-    if result.returncode != 0:
+    except RuntimeError as exc:
         logger.error(
-            "inspect failed mcp=%s capability=%s run_id=%s returncode=%s stdout=%s stderr=%s",
+            "inspect eval failed mcp=%s capability=%s run_id=%s error=%s",
             request.mcp,
             request.capability,
             run_id,
-            result.returncode,
-            result.stdout,
-            result.stderr,
+            exc,
         )
-        _fail_job(run_id, f"inspect eval failed (exit {result.returncode})")
-        return
-
-    try:
-        log_path, log_data, raw = find_inspect_log_for_task(task_name)
-    except FileNotFoundError as exc:
-        logger.error("inspect log lookup failed task=%s run_id=%s error=%s", task_name, run_id, exc)
         _fail_job(run_id, str(exc))
+        return
+    except Exception as exc:
+        logger.exception(
+            "inspect eval unexpected error mcp=%s capability=%s run_id=%s",
+            request.mcp,
+            request.capability,
+            run_id,
+        )
+        _fail_job(run_id, f"inspect eval failed: {exc}")
         return
 
     transcript = transcript_from_inspect_log(log_data, request.mcp, request.capability)
@@ -439,14 +440,14 @@ def trigger_inspect_eval(
     model: str | None = Query(None),
     settings: RunnerSettings = Depends(get_settings),
 ):
-    """Queue real Inspect subprocess; poll GET /eval/runs/{run_id} until scored or failed."""
+    """Queue in-process Inspect eval; poll GET /eval/runs/{run_id} until scored or failed."""
     if body is not None:
         request = body
     elif mcp and capability:
         request = InspectEvalRequest(
             mcp=mcp,
             capability=capability,
-            model=model or "openai/gpt-4o-mini",
+            model=model,
         )
     else:
         raise HTTPException(
