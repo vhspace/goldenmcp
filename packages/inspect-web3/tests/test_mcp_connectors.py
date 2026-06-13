@@ -31,10 +31,17 @@ def test_odos_stdio_env_requires_wallet_for_swap(monkeypatch):
         odos_stdio_env(require_wallet=True)
 
 
-def test_odos_stdio_env_passes_wallet(monkeypatch):
+def test_odos_stdio_env_strips_0x_prefix(monkeypatch):
+    # @iqai/mcp-odos's viem parser wants the bare hex key, not 0x-prefixed.
     monkeypatch.setenv("WALLET_PRIVATE_KEY", "0xabc")
     env = odos_stdio_env(require_wallet=False)
-    assert env["WALLET_PRIVATE_KEY"] == "0xabc"
+    assert env["WALLET_PRIVATE_KEY"] == "abc"
+
+
+def test_odos_stdio_env_passes_bare_wallet_unchanged(monkeypatch):
+    monkeypatch.setenv("WALLET_PRIVATE_KEY", "abc")
+    env = odos_stdio_env(require_wallet=False)
+    assert env["WALLET_PRIVATE_KEY"] == "abc"
 
 
 def test_lifi_http_requires_url(monkeypatch):
