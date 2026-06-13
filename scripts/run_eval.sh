@@ -63,20 +63,23 @@ run_together() {  # $1 = together slug; remaining args -> inspect
       --max-connections 1 "$@"
 }
 
-# Qwen3.5 thinking disabled via GenerateConfig.extra_body (chat_template_kwargs).
-# extra_body can't be set on Inspect's CLI and is rejected by the other providers,
-# so the task applies it only when GOLDENMCP_DISABLE_THINKING=1.
-run_qwen() {
-  GOLDENMCP_DISABLE_THINKING=1 run_together "Qwen/Qwen3.5-9B" "$@"
+# Together model with thinking disabled via GenerateConfig.extra_body
+# (chat_template_kwargs.enable_thinking=false). extra_body can't be set on Inspect's
+# CLI and is rejected (HTTP 400) by the Anthropic endpoint, so the task applies it
+# only when GOLDENMCP_DISABLE_THINKING=1. Used for Qwen3.5 and gemma-4 (both reason
+# by default).
+run_together_nothink() {  # $1 = slug; rest -> inspect
+  local slug="$1"; shift
+  GOLDENMCP_DISABLE_THINKING=1 run_together "$slug" "$@"
 }
 
-SELECTED="${MODELS:-haiku qwen gptoss}"
+SELECTED="${MODELS:-haiku qwen gemma}"
 SELECTED="${SELECTED//,/ }"
 for m in $SELECTED; do
   case "$m" in
     haiku)  echo ">>> $TASK @ haiku (DO proxy)";   run_haiku "$@" ;;
-    qwen)   echo ">>> $TASK @ qwen3.5-9b (Together, no-think)"; run_qwen "$@" ;;
-    gptoss) echo ">>> $TASK @ gpt-oss-20b (Together)"; run_together "openai/gpt-oss-20b" "$@" ;;
-    *) echo "unknown model: $m (use haiku|qwen|gptoss)" >&2; exit 1 ;;
+    qwen)   echo ">>> $TASK @ qwen3.5-9b (Together, no-think)"; run_together_nothink "Qwen/Qwen3.5-9B" "$@" ;;
+    gemma)  echo ">>> $TASK @ gemma-4-31b-it (Together, no-think)"; run_together_nothink "google/gemma-4-31B-it" "$@" ;;
+    *) echo "unknown model: $m (use haiku|qwen|gemma)" >&2; exit 1 ;;
   esac
 done

@@ -40,7 +40,7 @@ SYSTEM_PROMPT = (
 EVAL_MODELS = [
     "anthropic/anthropic-claude-haiku-4.5",  # via DO inference proxy
     "together/Qwen/Qwen3.5-9B",  # open weight #1; thinking disabled (chat_template_kwargs)
-    "together/openai/gpt-oss-20b",  # open weight #2
+    "together/google/gemma-4-31B-it",  # open weight #2; non-thinking instruct
 ]
 
 # --- EVM quote prompts (Base) ---
