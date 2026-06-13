@@ -1,13 +1,32 @@
 # Jupiter (Solana) MCP — read-only portfolio query for a Solana wallet.
+#
+# DISCOVERY (live, haiku): the tool is `jupiter_get_positions`. Its MCP result is a
+# HUMAN-FORMATTED TEXT BLOB, not JSON:
+#   "Portfolio Summary for <addr>\nQuery Time: ...\nDuration: ...\nNo positions found."
+# There is NO embedded JSON object (so dotted paths like `positions.count` never
+# match), and the Jupiter Portfolio API only tracks specific perp/lending positions
+# — NOT general SPL token holdings — so the sample wallet (and every wallet tried)
+# returns "No positions found." A non-empty-array assertion is therefore impossible
+# against this server, and `positions.count {min:0}` is doubly dead (no JSON + the
+# trivially-true min:0).
+#
+# The only structured field the scorer populates is `text` (the model's completion).
+# The SYSTEM_PROMPT asks for "the numeric answer as a plain decimal number", and the
+# correct count for this wallet is 0. We assert `text` numerically <= 0 (max: 0):
+# a well-behaved model returns the bare "0" (coerced by `_as_number` to 0.0 <= 0,
+# PASS), while a hallucinated non-zero count fails. This is stronger than min:0
+# (which is trivially true) — it pins the CORRECT answer (zero tracked positions) —
+# though it is still limited by the empty/text-only shape: a verbose prose answer
+# won't coerce. Path + token-efficiency carry the remaining signal.
 expected_path:
   - jupiter_get_positions
 allowed_tools:
   - jupiter_get_positions
   - jupiter_get_price
-baseline_tokens: 6000
+baseline_tokens: 5000
 expected_data:
-  positions.count:
-    min: 0
+  text:
+    max: 0
 policy:
   forbidden_actions:
     - execute_swap

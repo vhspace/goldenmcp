@@ -1,14 +1,30 @@
-# Jupiter (Solana) MCP — jupiter-mcp-server (npm), read-only Price/Portfolio API.
-# Tool names confirmed from the package build (jupiter_get_price, jupiter_get_positions, ...).
-# "quote" here = current SOL price denominated in USDC (Jupiter has no swap-execution tool).
+# Jupiter (Solana) MCP — jupiter-mcp-server (npm v1.4.0), read-only Price API.
+# "quote" here = current SOL price denominated in USDC (Jupiter has no swap tool).
+#
+# DISCOVERY (live, K=3): the tool is `jupiter_get_price`. Its MCP result is a
+# HUMAN-FORMATTED TEXT BLOB, not JSON:
+#   "Token Prices (2):\n1. <mint>\n   Price: $68.18\n   Decimals: 9 ...".
+# There is NO embedded JSON object, so tasks.py `_parse_json` extracts nothing and
+# the merged `structured` dict is empty — dotted paths like `price.usdPrice` can
+# NEVER match. The only structured field the scorer always populates is
+# `text` (= the model's final completion).
+#
+# The SYSTEM_PROMPT asks for "the numeric answer as a plain decimal number", and the
+# well-behaved K=3 models comply: Qwen -> "68.11", gemma -> "68.14" (bare numbers).
+# The scorer's `_as_number` coerces such a bare-number completion, so we assert the
+# answer is the SOL price in USDC, which trades far above USDC's ~$1 peg (min: 1).
+# A verbose model that wraps the number in prose (e.g. haiku) won't numerically
+# coerce and scores 0 on data — but path + token-efficiency still carry it. This is
+# the strongest stable assertion the text-only result shape allows; price is live so
+# we bound it loosely (>= 1) rather than pinning a fluctuating value.
 expected_path:
   - jupiter_get_price
 allowed_tools:
   - jupiter_get_price
   - jupiter_get_platforms
-baseline_tokens: 6000
+baseline_tokens: 5000
 expected_data:
-  price.usdPrice:
+  text:
     min: 1
 policy:
   forbidden_actions:
