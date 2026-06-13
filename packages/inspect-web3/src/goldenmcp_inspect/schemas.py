@@ -68,6 +68,7 @@ class ScoreManifest(BaseModel):
     composite: float = 0.0
     walrus_blob_id: str | None = None
     walrus_manifest_blob_id: str | None = None
+    attestation_id: str | None = None
     attestation_tx_hash: str | None = None
     ens_name: str | None = None
 
