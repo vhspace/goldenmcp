@@ -6,6 +6,7 @@ export default function Home() {
       <h1>GoldenMCP</h1>
       <p>Web3 MCP evaluation marketplace — Walrus-backed scores, ENS identity, Chainlink attestation, x402 on Arc.</p>
       <ul>
+        <li><Link href="/demo">Marketplace</Link> — vendor performance cards (ENS + Golden Score)</li>
         <li><Link href="/leaderboard">Leaderboard</Link> — live scores from Arc registry + Walrus</li>
         <li><Link href="/ens">ENS Resolver</Link> — resolve MCP names to endpoints and eval blobs</li>
       </ul>
