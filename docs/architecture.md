@@ -7,7 +7,7 @@ flowchart TB
     CRE[Chainlink CRE] --> EvalRunner[eval-runner HTTP]
     EvalRunner --> Inspect
     CRE --> Walrus
-    CRE --> CAI[Confidential AI Attester]
+    CRE --> CAI[Confidential AI Attester TEE]
     CRE --> Registry[MCPRegistry on Arc]
     Registry --> ENS[ENS subnames]
     Walrus --> Web[apps/web demo]
@@ -32,8 +32,9 @@ flowchart TB
 
 ## Data flow
 
-1. Inspect eval runs against live MCP → transcript
-2. Scorers produce manifest → uploaded to Walrus
-3. CRE workflow reads Walrus → CAI attestation → Arc registry update
-4. ENS text records point to Walrus blobs and registry entries
-5. Agent pays x402 on marketplace → receives best MCP endpoint
+1. Inspect eval runs against live MCP → transcript → scorers produce a manifest
+2. CRE workflow submits the manifest to the CAI TEE; the completed inference (id + verdict + `response_digest`) is the attestation
+3. CRE publishes the manifest + raw eval log to Walrus
+4. CRE writes scores to the Arc registry and records the attestation (inference id + `bytes32` transcript hash) via `recordAttestation`
+5. ENS text records point to Walrus blobs and registry entries
+6. Agent pays x402 on marketplace → receives best MCP endpoint

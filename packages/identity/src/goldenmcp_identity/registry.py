@@ -52,7 +52,8 @@ REGISTRY_ABI = [
                     {"name": "mcpEndpoint", "type": "string"},
                     {"name": "agentUri", "type": "string"},
                     {"name": "ensName", "type": "string"},
-                    {"name": "lastAttestationTx", "type": "string"},
+                    {"name": "lastAttestationId", "type": "string"},
+                    {"name": "lastTranscriptHash", "type": "bytes32"},
                     {"name": "exists", "type": "bool"},
                 ],
                 "name": "",
@@ -115,11 +116,19 @@ class MCPRegistration(BaseModel):
     mcp_endpoint: str
     agent_uri: str
     ens_name: str
-    last_attestation_tx: str = ""
+    # CAI inference id + bytes32 transcript hash (response digest) of the last attestation.
+    last_attestation_id: str = ""
+    last_transcript_hash: str = ""
 
 
 def score_to_bps(score: float) -> int:
     return int(round(max(0.0, min(1.0, score)) * 10000))
+
+
+def _format_bytes32(value: bytes | bytearray | str) -> str:
+    """0x-prefix a bytes32; return '' for the all-zero (unset) value."""
+    raw = value.hex() if isinstance(value, (bytes, bytearray)) else str(value).replace("0x", "")
+    return f"0x{raw}" if raw and int(raw, 16) != 0 else ""
 
 
 class RegistryClient:
@@ -208,7 +217,8 @@ class RegistryClient:
             mcp_endpoint=rec[1],
             agent_uri=rec[2],
             ens_name=rec[3],
-            last_attestation_tx=rec[4],
+            last_attestation_id=rec[4],
+            last_transcript_hash=_format_bytes32(rec[5]),
         )
 
     def list_agent_ids(self, max_id: int = 100) -> list[int]:

@@ -7,7 +7,7 @@ import {
   TxStatus,
   type Runtime,
 } from "@chainlink/cre-sdk";
-import { encodeFunctionData, parseAbi, type Hex } from "viem";
+import { encodeFunctionData, parseAbi, sha256, stringToHex, type Hex } from "viem";
 import type {
   CaiAttestation,
   Config,
@@ -21,7 +21,7 @@ const CRE_HTTP_TIMEOUT = "8s";
 
 const MCP_REGISTRY_ABI = parseAbi([
   "function updateCapabilityScore(uint256 agentId, string capability, uint16 dataScoreBps, uint16 pathScoreBps, uint16 tokenEfficiencyBps, uint16 compositeBps, bool failed, string walrusBlobId) external",
-  "function recordAttestation(uint256 agentId, string txHash) external",
+  "function recordAttestation(uint256 agentId, string inferenceId, bytes32 transcriptHash) external",
 ]);
 
 const MINIMAL_SCORE_TRANSCRIPT = {
@@ -79,49 +79,47 @@ export function finalizeEvalRunPollStatus(
   }
 }
 
-function extractAttestationFields(parsed: Record<string, unknown>): CaiAttestation {
-  const attestation_id =
-    typeof parsed.attestation_id === "string"
-      ? parsed.attestation_id
-      : typeof parsed.attestationId === "string"
-        ? parsed.attestationId
-        : undefined;
-  const attestation_tx_hash =
-    typeof parsed.attestation_tx_hash === "string"
-      ? parsed.attestation_tx_hash
-      : typeof parsed.attestationTxHash === "string"
-        ? parsed.attestationTxHash
-        : typeof parsed.tx_hash === "string"
-          ? parsed.tx_hash
-          : undefined;
-  return { attestation_id, attestation_tx_hash };
+/** Completed CAI status object as returned by GET /v1/inference/{id}. */
+export interface CaiStatus {
+  id?: string;
+  status?: string;
+  model?: string;
+  output?: string;
+  error?: string;
+  completed_at?: string;
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  resources?: { response_digest?: string }[];
 }
 
-export function parseCaiAttestation(output: string): CaiAttestation {
-  const trimmed = output.trim();
-  const attempts = [trimmed];
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenced?.[1]) {
-    attempts.push(fenced[1].trim());
-  }
-  const brace = trimmed.match(/\{[\s\S]*\}/);
-  if (brace?.[0]) {
-    attempts.push(brace[0]);
-  }
+/** Normalize a 32-byte hex digest (with/without 0x) to a 0x bytes32 value, else undefined. */
+export function toBytes32(hex: string | undefined): string | undefined {
+  if (!hex) return undefined;
+  const h = hex.replace(/^0[xX]/, "");
+  if (h.length !== 64 || !/^[0-9a-fA-F]+$/.test(h)) return undefined;
+  return `0x${h.toLowerCase()}`;
+}
 
-  for (const candidate of attempts) {
-    try {
-      const parsed = JSON.parse(candidate) as Record<string, unknown>;
-      const fields = extractAttestationFields(parsed);
-      if (fields.attestation_id || fields.attestation_tx_hash) {
-        return fields;
-      }
-    } catch {
-      // try next candidate
-    }
-  }
-
-  return {};
+/**
+ * Build the attestation from a completed CAI status object. The TEE inference
+ * itself is the attestation: a known model ran on the manifest inside the
+ * enclave. The inference id is the handle, the output is the verdict, and the
+ * resource response_digest is the verifiable transcript hash (per Chainlink's
+ * official undercollateralized-loan example). Falls back to sha256(output)
+ * when the API omits a response digest.
+ */
+export function parseCaiAttestation(status: CaiStatus, fallbackModel = "gemma4"): CaiAttestation {
+  const output = typeof status.output === "string" ? status.output : "";
+  const responseDigest = toBytes32(status.resources?.[0]?.response_digest);
+  const transcriptHash = responseDigest ?? (output ? sha256(stringToHex(output)) : undefined);
+  return {
+    inference_id: typeof status.id === "string" ? status.id : "",
+    model: typeof status.model === "string" && status.model ? status.model : fallbackModel,
+    verdict: output,
+    transcript_hash: transcriptHash,
+    completed_at: typeof status.completed_at === "string" ? status.completed_at : undefined,
+    prompt_tokens: status.usage?.prompt_tokens,
+    completion_tokens: status.usage?.completion_tokens,
+  };
 }
 
 function runtimeSleep(runtime: Runtime<Config>, ms: number): void {
@@ -147,16 +145,40 @@ function jsonAuthHeaders(token: string): Record<string, string> {
   };
 }
 
+const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/** WASM-safe base64 of UTF-8 bytes (QuickJS has no Node Buffer). */
+export function bytesToBase64(bytes: Uint8Array): string {
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i];
+    const b1 = i + 1 < bytes.length ? bytes[i + 1] : 0;
+    const b2 = i + 2 < bytes.length ? bytes[i + 2] : 0;
+    out += BASE64_ALPHABET[b0 >> 2];
+    out += BASE64_ALPHABET[((b0 & 3) << 4) | (b1 >> 4)];
+    out += i + 1 < bytes.length ? BASE64_ALPHABET[((b1 & 15) << 2) | (b2 >> 6)] : "=";
+    out += i + 2 < bytes.length ? BASE64_ALPHABET[b2 & 63] : "=";
+  }
+  return out;
+}
+
+/** WASM-safe lowercase hex of raw bytes. */
+export function bytesToHex(bytes: Uint8Array): string {
+  let out = "";
+  for (let i = 0; i < bytes.length; i++) {
+    out += bytes[i].toString(16).padStart(2, "0");
+  }
+  return out;
+}
+
 /** CRE HTTP capability expects request body as base64-encoded bytes on the wire. */
 function encodeHttpBody(payload: string): string {
-  return Buffer.from(payload, "utf8").toString("base64");
+  return bytesToBase64(new TextEncoder().encode(payload));
 }
 
 export function requireCaiAttestationFields(attestation: CaiAttestation): CaiAttestation {
-  if (!attestation.attestation_id?.trim() && !attestation.attestation_tx_hash?.trim()) {
-    throw new Error(
-      "CAI inference completed but output contained no attestation_id or attestation_tx_hash",
-    );
+  if (!attestation.inference_id?.trim()) {
+    throw new Error("CAI inference completed but response contained no inference id");
   }
   return attestation;
 }
@@ -381,13 +403,15 @@ export async function caiAttest(
   const config = runtime.config;
   const base = config.chainlinkCaiUrl.replace(/\/$/, "");
   const manifestJson = JSON.stringify(manifest);
-  const manifestBase64 = Buffer.from(manifestJson, "utf8").toString("base64");
+  const manifestBase64 = bytesToBase64(new TextEncoder().encode(manifestJson));
+  const model = "gemma4";
 
-  const submitBody = JSON.stringify({
-    model: "gemma4",
+  const submitBody: Record<string, unknown> = {
+    model,
     prompt: [
-      "Review the attached manifest.json GoldenMCP eval score manifest for consistency and integrity.",
-      "Return JSON only with keys attestation_id (string) and attestation_tx_hash (0x-prefixed hex string when available).",
+      "You are reviewing a GoldenMCP eval score manifest produced for an MCP server.",
+      "Assess whether the scores in manifest.json are internally consistent and the composite is plausible.",
+      "Reply with a short verdict: state PASS or FAIL and one sentence of reasoning.",
     ].join("\n"),
     resources: [
       {
@@ -396,14 +420,21 @@ export async function caiAttest(
         content_base64: manifestBase64,
       },
     ],
-  });
+  };
+  // Best-effort async relay: CAI POSTs `{input: <status>}` to this URL once on
+  // completion. The status has no run_id, so we carry it in the query string;
+  // the eval-runner webhook reads it and keys the callback for /eval/publish.
+  const callbackBase = config.evalRunnerUrl.replace(/\/$/, "");
+  submitBody.cre_callback = {
+    url: `${callbackBase}/webhooks/cai?run_id=${encodeURIComponent(manifest.run_id)}`,
+  };
 
   runtime.log(`CAI POST /v1/inference model=gemma4 run_id=${manifest.run_id}`);
   const submitResponse = httpClient
     .sendRequest(runtime, {
       url: `${base}/v1/inference`,
       method: "POST",
-      body: encodeHttpBody(submitBody),
+      body: encodeHttpBody(JSON.stringify(submitBody)),
       headers: {
         ...authHeaders(caiApiKey),
         "Content-Type": "application/json",
@@ -431,20 +462,16 @@ export async function caiAttest(
       })
       .result();
     const pollText = requireHttpOk(pollResponse, `CAI poll ${inferenceId} attempt ${attempt}`);
-    const pollParsed = JSON.parse(pollText) as {
-      status: string;
-      output?: string;
-      error?: string;
-    };
-    lastStatus = pollParsed.status;
+    const pollParsed = JSON.parse(pollText) as CaiStatus;
+    lastStatus = pollParsed.status ?? "queued";
     runtime.log(`CAI poll attempt=${attempt}/${config.caiPollMaxAttempts} status=${lastStatus}`);
 
     if (lastStatus === "completed") {
       const attestation = requireCaiAttestationFields(
-        parseCaiAttestation(pollParsed.output ?? ""),
+        parseCaiAttestation({ ...pollParsed, id: pollParsed.id ?? inferenceId }, model),
       );
       runtime.log(
-        `CAI completed attestation_id=${attestation.attestation_id} attestation_tx_hash=${attestation.attestation_tx_hash ?? "(none)"}`,
+        `CAI completed inference_id=${attestation.inference_id} model=${attestation.model} verdict_len=${attestation.verdict.length}`,
       );
       return attestation;
     }
@@ -475,8 +502,7 @@ export async function publishToWalrus(
   const base = runtime.config.evalRunnerUrl.replace(/\/$/, "");
   const body = JSON.stringify({
     run_id: runId,
-    attestation_id: attestation?.attestation_id,
-    attestation_tx_hash: attestation?.attestation_tx_hash,
+    attestation: attestation ?? null,
   });
 
   runtime.log(`POST /eval/publish (async) run_id=${runId}`);
@@ -527,7 +553,7 @@ function writeRegistryReport(
     );
   }
 
-  const txHash = txResult.txHash ? Buffer.from(txResult.txHash).toString("hex") : "";
+  const txHash = txResult.txHash ? bytesToHex(new Uint8Array(txResult.txHash)) : "";
   runtime.log(`${label} tx hash=${txHash || "(empty)"} status=${txResult.txStatus}`);
   return txHash ? (txHash.startsWith("0x") ? txHash : `0x${txHash}`) : "";
 }
@@ -538,7 +564,7 @@ export async function writeToArc(
   capability: string,
   manifest: ScoreManifest,
   walrusBlobId: string,
-  attestationTxHash?: string,
+  attestation?: CaiAttestation,
 ): Promise<{ scoreTxHash?: string; attestationRecordTxHash?: string }> {
   const registryAddress = runtime.config.arcRegistryAddress?.trim();
   if (!registryAddress) {
@@ -577,11 +603,13 @@ export async function writeToArc(
   );
 
   let attestationRecordTxHash: string | undefined;
-  if (attestationTxHash?.trim()) {
+  if (attestation?.inference_id?.trim()) {
+    const ZERO_BYTES32 = `0x${"0".repeat(64)}` as Hex;
+    const transcriptHash = (attestation.transcript_hash?.trim() || ZERO_BYTES32) as Hex;
     const recordData = encodeFunctionData({
       abi: MCP_REGISTRY_ABI,
       functionName: "recordAttestation",
-      args: [BigInt(agentId), attestationTxHash.trim()],
+      args: [BigInt(agentId), attestation.inference_id.trim(), transcriptHash],
     });
     attestationRecordTxHash = writeRegistryReport(
       runtime,
@@ -651,7 +679,7 @@ export async function runPipeline(
       target.capability,
       published.manifest,
       walrusBlobId,
-      attestation?.attestation_tx_hash,
+      attestation,
     );
     arcScoreTxHash = arcResult.scoreTxHash;
     arcAttestationTxHash = arcResult.attestationRecordTxHash;
@@ -666,8 +694,7 @@ export async function runPipeline(
     mcp: target.mcp,
     capability: target.capability,
     manifest: published.manifest,
-    attestationId: attestation?.attestation_id,
-    attestationTxHash: attestation?.attestation_tx_hash,
+    attestationInferenceId: attestation?.inference_id,
     walrusManifestBlobId: published.walrus_manifest_blob_id,
     walrusEvalBlobId: published.walrus_eval_blob_id,
     walrusIndexBlobId: published.walrus_index_blob_id,

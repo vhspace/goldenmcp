@@ -28,6 +28,7 @@ export default async function LeaderboardPage() {
             <th>Token</th>
             <th>Composite</th>
             <th>Failed</th>
+            <th>Attested</th>
           </tr>
         </thead>
         <tbody>
@@ -44,6 +45,21 @@ export default async function LeaderboardPage() {
               <td>{(e.tokenEfficiency * 100).toFixed(0)}%</td>
               <td>{(e.composite * 100).toFixed(0)}%</td>
               <td>{e.failed ? "YES" : "no"}</td>
+              <td>
+                {e.attestationRef ? (
+                  <span
+                    title={`TEE-attested — CAI inference ${e.attestationRef}${
+                      e.transcriptHash ? ` · transcript ${e.transcriptHash}` : ""
+                    }`}
+                    style={{ color: "#6ee7a8" }}
+                  >
+                    ✓ TEE {e.attestationRef.slice(0, 8)}…
+                    {e.transcriptHash ? ` (${e.transcriptHash.slice(0, 10)}…)` : ""}
+                  </span>
+                ) : (
+                  <span style={{ color: "#666" }}>—</span>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>

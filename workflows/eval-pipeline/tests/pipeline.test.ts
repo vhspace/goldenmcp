@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  bytesToBase64,
+  bytesToHex,
   finalizeCaiPollStatus,
   finalizeEvalRunPollStatus,
   isCaiConfigured,
@@ -70,40 +72,79 @@ describe("CAI skip / fail logic", () => {
 });
 
 describe("parseCaiAttestation", () => {
-  test("parses JSON attestation fields from output", () => {
-    const output = JSON.stringify({
-      attestation_id: "att-123",
-      attestation_tx_hash: "0xabc",
-      review: "ok",
+  test("builds attestation from a completed CAI status object", () => {
+    const status = {
+      id: "019ea785-abc",
+      status: "completed",
+      model: "gemma4",
+      output: "PASS — scores are internally consistent.",
+      completed_at: "2026-06-07T17:27:43Z",
+      usage: { prompt_tokens: 1898, completion_tokens: 1531 },
+    };
+    const att = parseCaiAttestation(status);
+    expect(att).toMatchObject({
+      inference_id: "019ea785-abc",
+      model: "gemma4",
+      verdict: "PASS — scores are internally consistent.",
+      completed_at: "2026-06-07T17:27:43Z",
+      prompt_tokens: 1898,
+      completion_tokens: 1531,
     });
-    expect(parseCaiAttestation(output)).toEqual({
-      attestation_id: "att-123",
-      attestation_tx_hash: "0xabc",
-    });
+    // No response_digest in the status → sha256(output) fallback transcript hash.
+    expect(att.transcript_hash).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
-  test("parses fenced JSON block", () => {
-    const output = `Review complete.\n\`\`\`json\n{"attestation_id":"x","attestation_tx_hash":"0xdead"}\n\`\`\``;
-    expect(parseCaiAttestation(output)).toEqual({
-      attestation_id: "x",
-      attestation_tx_hash: "0xdead",
+  test("uses the resource response_digest as the transcript hash", () => {
+    const att = parseCaiAttestation({
+      id: "019ea31f-0563",
+      status: "completed",
+      output: "```json\n{\"approved\":true}\n```",
+      resources: [
+        { response_digest: "0a0124911560a2236e432d30c3e2a90b0666f4c84b40bf10ba01960595c6ecea" },
+      ],
     });
-  });
-
-  test("requireCaiAttestationFields throws when output empty", () => {
-    expect(() => requireCaiAttestationFields({})).toThrow(/no attestation_id or attestation_tx_hash/);
-    expect(() => requireCaiAttestationFields({ attestation_id: "  " })).toThrow(
-      /no attestation_id or attestation_tx_hash/,
+    expect(att.transcript_hash).toBe(
+      "0x0a0124911560a2236e432d30c3e2a90b0666f4c84b40bf10ba01960595c6ecea",
     );
   });
 
-  test("requireCaiAttestationFields accepts id or tx hash", () => {
-    expect(requireCaiAttestationFields({ attestation_id: "att-1" })).toEqual({
-      attestation_id: "att-1",
-    });
-    expect(requireCaiAttestationFields({ attestation_tx_hash: "0xabc" })).toEqual({
-      attestation_tx_hash: "0xabc",
-    });
+  test("empty output yields valid attestation, no transcript hash", () => {
+    const att = parseCaiAttestation({ id: "inf-1", status: "completed" });
+    expect(att.inference_id).toBe("inf-1");
+    expect(att.verdict).toBe("");
+    expect(att.model).toBe("gemma4");
+    expect(att.transcript_hash).toBeUndefined();
+  });
+
+  test("requireCaiAttestationFields throws when inference id missing", () => {
+    expect(() => requireCaiAttestationFields({ inference_id: "", model: "gemma4", verdict: "" })).toThrow(
+      /no inference id/,
+    );
+    expect(() =>
+      requireCaiAttestationFields({ inference_id: "  ", model: "gemma4", verdict: "" }),
+    ).toThrow(/no inference id/);
+  });
+
+  test("requireCaiAttestationFields accepts a present inference id", () => {
+    const att = { inference_id: "inf-1", model: "gemma4", verdict: "PASS" };
+    expect(requireCaiAttestationFields(att)).toEqual(att);
+  });
+});
+
+describe("WASM-safe encoders", () => {
+  test("bytesToBase64 matches known vectors", () => {
+    const enc = (s: string) => bytesToBase64(new TextEncoder().encode(s));
+    expect(enc("")).toBe("");
+    expect(enc("f")).toBe("Zg==");
+    expect(enc("fo")).toBe("Zm8=");
+    expect(enc("foo")).toBe("Zm9v");
+    expect(enc("foobar")).toBe("Zm9vYmFy");
+    expect(enc('{"run_id":"abc"}')).toBe("eyJydW5faWQiOiJhYmMifQ==");
+  });
+
+  test("bytesToHex lowercases and zero-pads", () => {
+    expect(bytesToHex(new Uint8Array([0, 15, 255, 16]))).toBe("000fff10");
+    expect(bytesToHex(new Uint8Array([]))).toBe("");
   });
 });
 

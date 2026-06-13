@@ -43,7 +43,10 @@ contract MCPRegistryTest is Test {
 
     function test_record_attestation() public {
         uint256 id = registry.register("lifi", "https://mcp.lifi.io", "walrus://x", "lifi.goldenmcp.eth");
-        registry.recordAttestation(id, "0xabc123");
-        assertEq(registry.getRecord(id).lastAttestationTx, "0xabc123");
+        bytes32 transcriptHash = bytes32(uint256(0x0a01));
+        registry.recordAttestation(id, "019ea31f-0563", transcriptHash);
+        MCPRegistry.MCPRecord memory rec = registry.getRecord(id);
+        assertEq(rec.lastAttestationId, "019ea31f-0563");
+        assertEq(rec.lastTranscriptHash, transcriptHash);
     }
 }

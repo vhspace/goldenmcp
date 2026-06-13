@@ -47,7 +47,8 @@ class LookupResult(BaseModel):
     composite: float
     failed: bool
     walrus_blob_id: str
-    attestation_tx_hash: str | None = None
+    attestation_id: str | None = None
+    transcript_hash: str | None = None
 
 
 app = FastAPI(title="GoldenMCP Marketplace MCP")
@@ -87,7 +88,8 @@ def _load_index() -> list[dict[str, Any]]:
                     "composite": composite,
                     "failed": score[4],
                     "walrus_blob_id": score[5],
-                    "attestation_tx_hash": rec.last_attestation_tx or None,
+                    "attestation_id": rec.last_attestation_id or None,
+                    "transcript_hash": rec.last_transcript_hash or None,
                     "manifest": manifest,
                 }
             )
@@ -170,7 +172,8 @@ async def lookup(
         composite=top["composite"],
         failed=top["failed"],
         walrus_blob_id=top["walrus_blob_id"],
-        attestation_tx_hash=top.get("attestation_tx_hash"),
+        attestation_id=top.get("attestation_id"),
+        transcript_hash=top.get("transcript_hash"),
     )
     return {
         "results": [result.model_dump()],

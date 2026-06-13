@@ -2,7 +2,7 @@ import { createPublicClient, http, parseAbi } from "viem";
 
 const REGISTRY_ABI = parseAbi([
   "function nextAgentId() view returns (uint256)",
-  "function getRecord(uint256 agentId) view returns (string name, string mcpEndpoint, string agentUri, string ensName, string lastAttestationTx, bool exists)",
+  "function getRecord(uint256 agentId) view returns (string name, string mcpEndpoint, string agentUri, string ensName, string lastAttestationId, bytes32 lastTranscriptHash, bool exists)",
   "function getCapabilityScore(uint256 agentId, string capability) view returns (uint16 dataScoreBps, uint16 pathScoreBps, uint16 tokenScoreBps, uint16 compositeBps, bool failed, string walrusBlobId)",
 ]);
 
@@ -16,7 +16,10 @@ export interface LeaderboardEntry {
   failed: boolean;
   walrusBlobId: string;
   ensName: string;
-  attestationTx: string;
+  // CAI TEE inference id mirrored onchain. Empty when unattested.
+  attestationRef: string;
+  // bytes32 response digest from the TEE (0x000…0 when unattested).
+  transcriptHash: string;
 }
 
 function getClient() {
@@ -49,7 +52,7 @@ export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
       functionName: "getRecord",
       args: [id],
     });
-    if (!rec[5]) continue;
+    if (!rec[6]) continue;
     for (const cap of CAPABILITIES) {
       const score = await client.readContract({
         address: registry,
@@ -68,7 +71,9 @@ export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
         failed: score[4],
         walrusBlobId: score[5],
         ensName: rec[3],
-        attestationTx: rec[4],
+        attestationRef: rec[4],
+        transcriptHash:
+          rec[5] && rec[5] !== `0x${"0".repeat(64)}` ? rec[5] : "",
       });
     }
   }
