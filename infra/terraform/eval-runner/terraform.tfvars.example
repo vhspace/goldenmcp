@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars and fill in non-secret values.
+# Do NOT commit terraform.tfvars if it contains sensitive data.
+
+region          = "nyc3"
+droplet_size    = "s-4vcpu-8gb"
+droplet_name    = "goldenmcp-eval-runner"
+repo_url        = "https://github.com/vhspace/goldenmcp.git"
+repo_branch     = "main"
+
+# Restrict to your public IP(s), e.g. ["203.0.113.10/32"]
+allowed_ssh_cidrs = ["YOUR_PUBLIC_IP/32"]
+
+# SSH public key (terraform apply script can pass -var ssh_public_key=@~/.ssh/id_ed25519.pub)
+# ssh_public_key = "ssh-ed25519 AAAA..."

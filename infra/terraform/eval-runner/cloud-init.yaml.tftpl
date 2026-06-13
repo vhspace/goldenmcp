@@ -1,0 +1,107 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+
+packages:
+  - git
+  - curl
+  - ca-certificates
+  - nginx
+  - openssl
+  - nodejs
+  - npm
+  - build-essential
+  - python3
+  - python3-venv
+
+users:
+  - name: goldenmcp
+    groups: users
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    home: /home/goldenmcp
+
+write_files:
+  - path: /etc/systemd/system/goldenmcp-eval-runner.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=GoldenMCP eval-runner HTTP service (Inspect host for CRE)
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      User=goldenmcp
+      Group=goldenmcp
+      WorkingDirectory=${repo_install_path}
+      EnvironmentFile=/etc/goldenmcp/.env
+      ExecStart=/home/goldenmcp/.local/bin/uv run python -m goldenmcp_eval_runner
+      Restart=always
+      RestartSec=10
+      TimeoutStartSec=300
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/nginx/sites-available/goldenmcp-eval-runner
+    permissions: "0644"
+    content: |
+      server {
+          listen 443 ssl;
+          listen [::]:443 ssl;
+          server_name _;
+
+          ssl_certificate /etc/ssl/certs/goldenmcp-selfsigned.crt;
+          ssl_certificate_key /etc/ssl/private/goldenmcp-selfsigned.key;
+
+          client_max_body_size 32m;
+          proxy_read_timeout 600s;
+          proxy_connect_timeout 60s;
+          proxy_send_timeout 600s;
+
+          location / {
+              proxy_pass http://127.0.0.1:8090;
+              proxy_http_version 1.1;
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $scheme;
+          }
+      }
+
+  - path: /etc/goldenmcp/.env
+    permissions: "0600"
+    owner: goldenmcp:goldenmcp
+    content: |
+      # Populated by scripts/sync-eval-runner-secrets.sh — not baked into cloud-init.
+      EVAL_RUNNER_HOST=0.0.0.0
+      EVAL_RUNNER_PORT=8090
+
+runcmd:
+  - mkdir -p /etc/goldenmcp
+  - chown goldenmcp:goldenmcp /etc/goldenmcp
+  - chmod 700 /etc/goldenmcp
+  - |
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+      -keyout /etc/ssl/private/goldenmcp-selfsigned.key \
+      -out /etc/ssl/certs/goldenmcp-selfsigned.crt \
+      -subj "/CN=goldenmcp-eval-runner"
+  - chmod 600 /etc/ssl/private/goldenmcp-selfsigned.key
+  - ln -sf /etc/nginx/sites-available/goldenmcp-eval-runner /etc/nginx/sites-enabled/goldenmcp-eval-runner
+  - rm -f /etc/nginx/sites-enabled/default
+  - nginx -t && systemctl enable nginx && systemctl restart nginx
+  - |
+    sudo -u goldenmcp bash -lc 'curl -LsSf https://astral.sh/uv/install.sh | sh'
+  - |
+    if [ ! -d "${repo_install_path}/.git" ]; then
+      git clone --branch ${repo_branch} --depth 1 ${repo_url} ${repo_install_path}
+      chown -R goldenmcp:goldenmcp ${repo_install_path}
+    fi
+  - |
+    sudo -u goldenmcp bash -lc "cd ${repo_install_path} && /home/goldenmcp/.local/bin/uv sync --all-packages"
+  - systemctl daemon-reload
+  - systemctl enable goldenmcp-eval-runner.service
+  - systemctl start goldenmcp-eval-runner.service || true
+
+final_message: "GoldenMCP eval-runner bootstrap complete. Run sync-eval-runner-secrets.sh to upload API keys."
