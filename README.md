@@ -38,10 +38,13 @@ uv run python demo/lookup_agent.py --capability quote --min-score 0.9
 Copy `.env.example` to `.env` and fill in credentials, or bootstrap eval env on a demo machine:
 
 ```bash
-chmod +x scripts/setup_eval_env.sh
-./scripts/setup_eval_env.sh          # generates cast wallet, sets MCP URLs, uv sync
+chmod +x scripts/setup_eval_env.sh scripts/verify_walrus.sh
+./scripts/setup_eval_env.sh          # generates cast wallet, sets MCP + Walrus URLs, uv sync
 ./scripts/setup_eval_env.sh --check  # prerequisites only
+./scripts/verify_walrus.sh           # live Walrus testnet upload/read (requires .env)
 ```
+
+Walrus eval storage uses the public testnet HTTP publisher/aggregator — no Sui wallet or CLI required. `setup_eval_env.sh` sets `WALRUS_PUBLISHER_URL`, `WALRUS_AGGREGATOR_URL`, `WALRUS_EPOCHS`, and `NEXT_PUBLIC_WALRUS_AGGREGATOR_URL` from `.env.example` defaults. See [Walrus HTTP API docs](https://docs.wal.app/docs/http-api/storing-blobs).
 
 Eval chain defaults: **Base (8453)** for quote evals; **Fraxtal (252)** for `odos_swap`. Fund `EVM_EVAL_ADDRESS` on Base (+ Fraxtal for Odos swaps). ENS identity uses Sepolia separately.
 

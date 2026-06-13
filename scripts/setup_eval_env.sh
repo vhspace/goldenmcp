@@ -4,6 +4,7 @@
 # Usage:
 #   ./scripts/setup_eval_env.sh           # create/update .env (generates wallet if missing)
 #   ./scripts/setup_eval_env.sh --check   # verify prerequisites only
+#   ./scripts/setup_eval_env.sh --verify-walrus  # live Walrus testnet upload/read
 #
 # Chain strategy (see packages/inspect-web3/src/goldenmcp_inspect/eval_chains.py):
 #   - Quote evals: Base mainnet (8453) for LI.FI, Odos, Uniswap
@@ -13,6 +14,11 @@
 # After running, fund the printed address:
 #   - Base (8453):     https://docs.base.org/base-chain/tools/network-faucets
 #   - Fraxtal (252):   https://docs.frax.com/fraxtal/welcome/faucet (for odos_swap)
+#
+# Walrus eval storage (testnet HTTP publisher — no Sui wallet required):
+#   - Publisher: https://publisher.walrus-testnet.walrus.space
+#   - Aggregator: https://aggregator.walrus-testnet.walrus.space
+#   - Docs: https://docs.wal.app/docs/http-api/storing-blobs
 
 set -euo pipefail
 
@@ -20,10 +26,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ROOT}/.env"
 EXAMPLE="${ROOT}/.env.example"
 CHECK_ONLY=false
+VERIFY_WALRUS=false
 
-if [[ "${1:-}" == "--check" ]]; then
-  CHECK_ONLY=true
-fi
+for arg in "$@"; do
+  case "$arg" in
+    --check) CHECK_ONLY=true ;;
+    --verify-walrus) VERIFY_WALRUS=true ;;
+  esac
+done
 
 log() { printf '[setup_eval_env] %s\n' "$*"; }
 err() { printf '[setup_eval_env] ERROR: %s\n' "$*" >&2; }
@@ -40,6 +50,9 @@ check_prerequisites() {
   require_cmd node
   require_cmd npx
   require_cmd cast
+  if $VERIFY_WALRUS; then
+    require_cmd curl
+  fi
   log "Prerequisites OK: uv, node, npx, cast"
 }
 
@@ -114,6 +127,44 @@ ensure_default_urls() {
   fi
 }
 
+ensure_walrus_defaults() {
+  local publisher="https://publisher.walrus-testnet.walrus.space"
+  local aggregator="https://aggregator.walrus-testnet.walrus.space"
+
+  if [[ -z "$(env_get WALRUS_PUBLISHER_URL)" ]]; then
+    env_set WALRUS_PUBLISHER_URL "$publisher"
+    log "Set WALRUS_PUBLISHER_URL=${publisher}"
+  fi
+  if [[ -z "$(env_get WALRUS_AGGREGATOR_URL)" ]]; then
+    env_set WALRUS_AGGREGATOR_URL "$aggregator"
+    log "Set WALRUS_AGGREGATOR_URL=${aggregator}"
+  fi
+  if [[ -z "$(env_get WALRUS_EPOCHS)" ]]; then
+    env_set WALRUS_EPOCHS "1"
+    log "Set WALRUS_EPOCHS=1 (testnet epoch = 1 day; increase for longer retention)"
+  fi
+  if [[ -z "$(env_get NEXT_PUBLIC_WALRUS_AGGREGATOR_URL)" ]]; then
+    env_set NEXT_PUBLIC_WALRUS_AGGREGATOR_URL "$aggregator"
+    log "Set NEXT_PUBLIC_WALRUS_AGGREGATOR_URL=${aggregator}"
+  fi
+}
+
+verify_walrus_reachable() {
+  local aggregator
+  aggregator="$(env_get WALRUS_AGGREGATOR_URL)"
+  if [[ -z "$aggregator" ]]; then
+    err "WALRUS_AGGREGATOR_URL is not set"
+    exit 1
+  fi
+
+  log "Checking Walrus aggregator API at ${aggregator}/v1/api"
+  if ! curl -fsS "${aggregator}/v1/api" >/dev/null; then
+    err "Walrus aggregator unreachable: ${aggregator}/v1/api"
+    exit 1
+  fi
+  log "Walrus aggregator reachable"
+}
+
 generate_eval_wallet() {
   local existing
   existing="$(env_get WALLET_PRIVATE_KEY)"
@@ -179,6 +230,9 @@ Run unit tests:
 Run first live eval (after LLM key set):
   uv run inspect eval goldenmcp/lifi_quote --model anthropic/claude-3-5-haiku-20241022
 
+Walrus eval storage (testnet, no Sui wallet):
+  ./scripts/verify_walrus.sh
+
 Chain defaults: Base (8453) quotes; Fraxtal (252) for odos_swap only.
 EOF
 }
@@ -193,8 +247,16 @@ main() {
   ensure_env_file
   remove_stale_env_keys
   ensure_default_urls
+  ensure_walrus_defaults
   generate_eval_wallet
   sync_python_deps
+
+  if $VERIFY_WALRUS; then
+    verify_walrus_reachable
+    log "Running live Walrus upload/download tests"
+    (cd "$ROOT" && ./scripts/verify_walrus.sh)
+  fi
+
   print_next_steps
 }
 
