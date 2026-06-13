@@ -79,5 +79,3 @@ export async function main() {
   const runner = await Runner.newRunner<Config>();
   await runner.run(initWorkflow);
 }
-
-export { runPipeline };
