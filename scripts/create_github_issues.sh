@@ -20,6 +20,15 @@ create_label "estimate:4h" "FEF2C0" "Estimate 4 hours"
 
 create_issue() {
   local num="$1" title="$2" epic="$3" estimate="$4" skill="$5" acceptance="$6"
+  local blocked_by="${7:-}"
+  local blocked_section=""
+  if [[ -n "$blocked_by" ]]; then
+    blocked_section="## Blocked by
+$blocked_by"
+  else
+    blocked_section="## Blocked by
+_(none)_"
+  fi
   gh issue create -R "$REPO" \
     --title "[#$num] $title" \
     --label "P0,epic/$epic,$estimate" \
@@ -35,6 +44,8 @@ $skill
 
 ## Acceptance tests
 $acceptance
+
+$blocked_section
 
 ## Plan reference
 GoldenMCP eval marketplace — issue #$num

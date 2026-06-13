@@ -1,12 +1,14 @@
-name = "Task"
-description = "Implementation task for GoldenMCP"
-title = "Task"
-labels: ["P0"]
+name: Task
+description: Implementation task for GoldenMCP
+title: "Task: "
+labels:
+  - P0
 body:
   - type: dropdown
     id: epic
     attributes:
       label: Epic
+      description: Also add the matching epic/* label after creating the issue
       options:
         - epic/infra
         - epic/eval
@@ -21,6 +23,7 @@ body:
     id: estimate
     attributes:
       label: Estimate
+      description: Also add the matching estimate:* label after creating the issue
       options:
         - estimate:1h
         - estimate:2h
@@ -46,7 +49,12 @@ body:
     id: blocked_by
     attributes:
       label: Blocked by
-      description: Issue numbers or external dependencies
+      description: GitHub issue numbers (e.g. GH #5, GH #11) or external dependencies
+  - type: input
+    id: plan_reference
+    attributes:
+      label: Plan reference
+      placeholder: "GoldenMCP eval marketplace — issue #40"
   - type: textarea
     id: description
     attributes:
