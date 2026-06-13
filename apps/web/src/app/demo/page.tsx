@@ -1,5 +1,6 @@
 import { fetchVendorProfiles } from "@/lib/data";
 import { VendorPerformanceCard } from "@/components/VendorPerformanceCard";
+import { ExecutionSandbox } from "@/components/ExecutionSandbox";
 import { GOLDEN_SCORE_THRESHOLDS, METER_THRESHOLDS, type VendorProfile } from "@/lib/vendors";
 
 export const dynamic = "force-dynamic";
@@ -17,12 +18,17 @@ export default async function DemoPage() {
   return (
     <div>
       <header style={{ marginBottom: "2rem" }}>
-        <h1 style={{ margin: 0 }}>Global Overview Room</h1>
+        <h1 style={{ margin: 0 }}>GoldenMCP Demo</h1>
         <p style={{ color: "#aaa", marginTop: "0.5rem", maxWidth: "52rem" }}>
-          Consumer-friendly MCP marketplace registry — vendors discovered via live ENS (ENSIP-25/26)
-          with K=3 Golden Scores from Arc registry and Walrus manifests.
+          Hackathon judge demo — run pre-baked prompts, browse ENS-verified vendors, and inspect live
+          K=3 Golden Scores from Arc + Walrus.
         </p>
       </header>
+
+      <ExecutionSandbox />
+
+      <section style={{ marginTop: "1rem" }}>
+        <h2 style={{ margin: "0 0 1.25rem", fontSize: "1.35rem" }}>Global Overview Room</h2>
 
       {error && (
         <div
@@ -85,6 +91,7 @@ export default async function DemoPage() {
           </aside>
         </>
       )}
+      </section>
     </div>
   );
 }
