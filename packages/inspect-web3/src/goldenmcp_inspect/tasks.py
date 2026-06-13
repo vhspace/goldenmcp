@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 
 from inspect_ai import Task, task
 from inspect_ai.dataset import Sample
@@ -104,11 +105,22 @@ def _build_task(
             generate(),
         ],
         scorer=_make_transcript_scorer(mcp, capability),
-        # Disable Anthropic prompt caching so token_efficiency reflects real usage
-        # and stays comparable across the K=3 providers (no cache-read inflation).
-        config=GenerateConfig(cache_prompt=False),
+        config=_generate_config(),
         metadata={"mcp": mcp, "capability": capability, "benchmark": benchmark.model_dump()},
     )
+
+
+def _generate_config() -> GenerateConfig:
+    # Disable Anthropic prompt caching so token_efficiency reflects real usage and
+    # stays comparable across the K=3 providers (no cache-read inflation).
+    cfg = GenerateConfig(cache_prompt=False)
+    # extra_body cannot be set via Inspect's CLI (--model-config / -M route to the
+    # provider constructor), and chat_template_kwargs is rejected (HTTP 400) by the
+    # Anthropic/Mistral endpoints — so it must be applied per-model, in-task, gated
+    # on an env var the runner sets only for the Qwen invocation.
+    if os.environ.get("GOLDENMCP_DISABLE_THINKING") == "1":
+        cfg.extra_body = {"chat_template_kwargs": {"enable_thinking": False}}
+    return cfg
 
 
 @task

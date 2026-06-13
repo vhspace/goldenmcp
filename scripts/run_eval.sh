@@ -9,7 +9,10 @@
 #   - Haiku  -> DigitalOcean inference proxy (ANTHROPIC_BASE_URL + DO_INFERENCE_KEY),
 #              passed explicitly via --model-base-url / -M api_key because Inspect's
 #              env-var auth handling conflicts with the proxy.
-#   - Llama, MiniMax -> Together (TOGETHER_API_KEY, native endpoint).
+#   - Qwen3.5-9B, Mistral-Small -> Together (TOGETHER_API_KEY, native endpoint).
+#     Qwen runs with thinking disabled via chat_template_kwargs in extra_body
+#     (passed through GenerateConfig via --model-config, since extra_body is not a
+#     -M provider arg).
 # A leaked ANTHROPIC_BASE_URL from a Claude Code shell is stripped so it can't
 # hijack the Together runs.
 #
@@ -52,20 +55,28 @@ run_haiku() {
       --max-connections 1 "$@"
 }
 
-run_together() {  # $1 = together slug
+run_together() {  # $1 = together slug; remaining args -> inspect
+  local slug="$1"; shift
   "${CLEAN_ENV[@]}" TOGETHER_API_KEY="$TOGETHER_API_KEY" uv run "${WITH[@]}" \
     inspect eval "src/goldenmcp_inspect/tasks.py@${TASK}" \
-      --model "together/$1" \
+      --model "together/$slug" \
       --max-connections 1 "$@"
 }
 
-SELECTED="${MODELS:-haiku llama minimax}"
+# Qwen3.5 thinking disabled via GenerateConfig.extra_body (chat_template_kwargs).
+# extra_body can't be set on Inspect's CLI and is rejected by the other providers,
+# so the task applies it only when GOLDENMCP_DISABLE_THINKING=1.
+run_qwen() {
+  GOLDENMCP_DISABLE_THINKING=1 run_together "Qwen/Qwen3.5-9B" "$@"
+}
+
+SELECTED="${MODELS:-haiku qwen gptoss}"
 SELECTED="${SELECTED//,/ }"
 for m in $SELECTED; do
   case "$m" in
-    haiku)   echo ">>> $TASK @ haiku (DO proxy)";  run_haiku "$@" ;;
-    llama)   echo ">>> $TASK @ llama (Together)";  run_together "meta-llama/Llama-3.3-70B-Instruct-Turbo" "$@" ;;
-    minimax) echo ">>> $TASK @ minimax (Together)"; run_together "MiniMaxAI/MiniMax-M2.7" "$@" ;;
-    *) echo "unknown model: $m (use haiku|llama|minimax)" >&2; exit 1 ;;
+    haiku)  echo ">>> $TASK @ haiku (DO proxy)";   run_haiku "$@" ;;
+    qwen)   echo ">>> $TASK @ qwen3.5-9b (Together, no-think)"; run_qwen "$@" ;;
+    gptoss) echo ">>> $TASK @ gpt-oss-20b (Together)"; run_together "openai/gpt-oss-20b" "$@" ;;
+    *) echo "unknown model: $m (use haiku|qwen|gptoss)" >&2; exit 1 ;;
   esac
 done

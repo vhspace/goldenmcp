@@ -6,6 +6,8 @@ expected_path:
   - get-quote
 allowed_tools:
   - get-chains
+  - get-chain-by-id
+  - get-chain-by-name
   - get-token
   - get-tokens
   - get-quote

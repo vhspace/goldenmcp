@@ -35,12 +35,12 @@ SYSTEM_PROMPT = (
 )
 
 # K=3 model ensemble. Each task runs on all three; the Chainlink CRE judge
-# validates the aggregated final score inside the TEE.
-# NOTE: confirm the exact Together slug for MiniMax before a live run.
+# validates the aggregated final score inside the TEE. Provider routing + the
+# Qwen thinking-disable flag are applied per model in scripts/run_eval.sh.
 EVAL_MODELS = [
-    "anthropic/claude-haiku-4-5-20251001",
-    "together/meta-llama/Llama-3.3-70B-Instruct-Turbo",
-    "together/MiniMaxAI/MiniMax-M2.7",
+    "anthropic/anthropic-claude-haiku-4.5",  # via DO inference proxy
+    "together/Qwen/Qwen3.5-9B",  # open weight #1; thinking disabled (chat_template_kwargs)
+    "together/openai/gpt-oss-20b",  # open weight #2
 ]
 
 # --- EVM quote prompts (Base) ---
