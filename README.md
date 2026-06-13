@@ -1,0 +1,3 @@
+# goldenmcp
+
+MCP server.
