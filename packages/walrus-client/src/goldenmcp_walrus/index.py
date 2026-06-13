@@ -62,7 +62,6 @@ class WalrusIndex:
 
     def to_json(self) -> dict[str, Any]:
         return {
-            "index_blob_id": self.index_blob_id,
             "files": {
                 path: {
                     "blob_id": entry.blob_id,
@@ -81,9 +80,12 @@ class WalrusIndex:
             for path, meta in files.items():
                 if not isinstance(meta, dict):
                     continue
+                blob_id = meta.get("blob_id")
+                if not blob_id:
+                    continue
                 index.register(
                     str(path),
-                    blob_id=str(meta["blob_id"]),
+                    blob_id=str(blob_id),
                     size=int(meta.get("size", 0)),
                     mtime=float(meta.get("mtime", 0.0)),
                 )

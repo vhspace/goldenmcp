@@ -65,15 +65,17 @@ class WalrusFileSystem(AbstractFileSystem):
     def _persist_index(self) -> None:
         blob_id = self.client.upload(self.index.to_bytes(), content_type="application/json")
         self.index.index_blob_id = blob_id
-        logger.info("persisted walrus index blob_id=%s files=%d", blob_id, len(self.index._files))
+        logger.info(
+            "persisted walrus index blob_id=%s files=%d",
+            blob_id,
+            len(self.index._files),
+        )
 
     @classmethod
     def _strip_protocol(cls, path: str) -> str:
         if isinstance(path, list):
             return [cls._strip_protocol(p) for p in path]
-        if path.startswith("walrus://"):
-            return path[len("walrus://") :]
-        return path.lstrip("/")
+        return WalrusIndex.normalize_path(path)
 
     def unstrip_protocol(self, name: str) -> str:
         if name.startswith("walrus://"):
@@ -125,6 +127,13 @@ class WalrusFileSystem(AbstractFileSystem):
     def info(self, path: str, **kwargs) -> dict[str, Any]:
         normalized = WalrusIndex.normalize_path(path)
         entry = self.index.resolve(normalized)
+        if entry is None and self.index.list_prefix(normalized):
+            return {
+                "name": self.unstrip_protocol(normalized),
+                "type": "directory",
+                "size": 0,
+                "mtime": time.time(),
+            }
         if entry is None and _looks_like_blob_id(normalized):
             data = self.client.download(normalized)
             return {

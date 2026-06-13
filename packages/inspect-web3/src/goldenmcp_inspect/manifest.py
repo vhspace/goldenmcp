@@ -43,6 +43,34 @@ def manifest_to_json(manifest: ScoreManifest) -> str:
     return json.dumps(manifest.to_public_dict(), indent=2)
 
 
+def synthesize_inspect_log_bytes(transcript: EvalTranscript, manifest: ScoreManifest) -> bytes:
+    """Build minimal Inspect-compatible JSON log bytes when only a transcript is available."""
+    events: list[dict[str, Any]] = []
+    for event in transcript.events:
+        if event.kind == "tool":
+            events.append(
+                {
+                    "event": "tool",
+                    "tool_call": {
+                        "function": event.tool_name,
+                        "arguments": event.content,
+                    },
+                }
+            )
+    if transcript.total_tokens:
+        events.append({"event": "model", "usage": {"total_tokens": transcript.total_tokens}})
+
+    payload = {
+        "status": "success",
+        "eval": {
+            "task": f"goldenmcp/{transcript.mcp}_{transcript.capability}",
+            "task_id": manifest.run_id,
+        },
+        "samples": [{"events": events, "output": transcript.final_output}],
+    }
+    return json.dumps(payload, indent=2).encode()
+
+
 def transcript_from_inspect_log(log_data: dict[str, Any], mcp: str, capability: str) -> EvalTranscript:
     """Parse Inspect eval log JSON into EvalTranscript."""
     events = []

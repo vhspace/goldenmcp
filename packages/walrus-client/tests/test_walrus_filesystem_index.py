@@ -4,33 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from goldenmcp_walrus.client import WalrusClient
+from goldenmcp_walrus.testing import InMemoryWalrusClient
 from goldenmcp_walrus.filesystem import WalrusFileSystem
 from goldenmcp_walrus.index import WalrusIndex
-
-
-class InMemoryWalrusClient(WalrusClient):
-    """Test double storing blobs in RAM; no HTTP."""
-
-    def __init__(self) -> None:
-        self.blobs: dict[str, bytes] = {}
-        self.publisher_url = "http://memory"
-        self.aggregator_url = "http://memory"
-        self.epochs = 1
-        self.timeout = 1.0
-
-    def upload(self, data: bytes, *, content_type: str = "application/octet-stream") -> str:
-        blob_id = f"mem-{len(self.blobs)}"
-        self.blobs[blob_id] = data
-        return blob_id
-
-    def download(self, blob_id: str) -> bytes:
-        try:
-            return self.blobs[blob_id]
-        except KeyError as exc:
-            from goldenmcp_walrus.client import WalrusError
-
-            raise WalrusError(f"missing blob {blob_id}") from exc
 
 
 @pytest.fixture

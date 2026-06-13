@@ -42,6 +42,7 @@ def main() -> int:
             {
                 "walrus_manifest_blob_id": result.walrus_manifest_blob_id,
                 "walrus_eval_blob_id": result.walrus_eval_blob_id,
+                "walrus_index_blob_id": result.walrus_index_blob_id,
                 "composite": result.manifest.composite,
                 "failed": result.manifest.failed,
             },

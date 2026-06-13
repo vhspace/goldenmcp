@@ -47,7 +47,7 @@ Eval chain defaults: **Base (8453)** for quote evals; **Fraxtal (252)** for `odo
 
 ### Walrus + Inspect View
 
-GoldenMCP stores eval logs on Walrus with an indexed `walrus://` path (S3-style keys over content-addressed blobs). After the first upload, set `WALRUS_INDEX_BLOB_ID` in `.env` to the printed index blob ID.
+GoldenMCP stores eval logs on Walrus with an indexed `walrus://` path (S3-style keys over content-addressed blobs). After the first upload, set `WALRUS_INDEX_BLOB_ID` in `.env` from the `walrus_index_blob_id` field printed by `post_eval_walrus.py`.
 
 ```bash
 # Upload scored eval + raw Inspect log bytes
