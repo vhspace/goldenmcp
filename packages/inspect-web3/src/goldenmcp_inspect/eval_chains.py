@@ -15,28 +15,28 @@ FRAXTAL_CHAIN_NAME = "fraxtal"
 # Small amounts to limit mainnet spend during evals.
 EVAL_ETH_AMOUNT = "0.001"
 
+# Prompts are deliberately intent-level and do NOT name the tools to call: the
+# model must choose the tool trajectory from the MCP's tool descriptions, so
+# PathScore measures planning rather than instruction-copying.
 LIFI_QUOTE_PROMPT = (
-    f"Use the LI.FI MCP to get a quote for swapping {EVAL_ETH_AMOUNT} ETH to USDC on "
-    f"Base (chain ID {BASE_CHAIN_ID}). "
-    "Follow: get-chains, get-tokens, get-quote. Return the quote details."
+    f"Using the LI.FI MCP server, get a quote to swap {EVAL_ETH_AMOUNT} ETH for USDC "
+    f"on Base (chain ID {BASE_CHAIN_ID}). Report the expected USDC output amount."
 )
 
 LIFI_ROUTE_PROMPT = (
-    f"Use the LI.FI MCP to find the best route for {EVAL_ETH_AMOUNT} ETH to USDC on "
-    f"Base (chain ID {BASE_CHAIN_ID}). "
-    "Follow: get-chains, get-routes, get-step-transaction."
+    f"Using the LI.FI MCP server, find the best route to move {EVAL_ETH_AMOUNT} ETH "
+    f"into USDC on Base (chain ID {BASE_CHAIN_ID}) and report the route steps."
 )
 
 ODOS_QUOTE_PROMPT = (
-    f"Use the Odos MCP to get a swap quote for {EVAL_ETH_AMOUNT} ETH to USDC on "
-    f"Base (chain name {BASE_CHAIN_NAME!r}, chain ID {BASE_CHAIN_ID}). "
-    "Use ODOS_GET_CHAIN_ID if needed, then ODOS_GET_QUOTE. Return the quote details."
+    f"Using the Odos MCP server, get a swap quote for {EVAL_ETH_AMOUNT} ETH to USDC "
+    f"on Base (chain name {BASE_CHAIN_NAME!r}, chain ID {BASE_CHAIN_ID}). "
+    "Report the expected output amount."
 )
 
 ODOS_SWAP_PROMPT = (
-    f"Use the Odos MCP to get a quote and execute a tiny ETH to USDC swap on "
-    f"Fraxtal (chain name {FRAXTAL_CHAIN_NAME!r}, chain ID {FRAXTAL_CHAIN_ID}). "
-    "Use ODOS_GET_CHAIN_ID, ODOS_GET_QUOTE, then ODOS_SWAP."
+    f"Using the Odos MCP server, quote and execute a tiny {EVAL_ETH_AMOUNT} ETH to "
+    f"USDC swap on Fraxtal (chain name {FRAXTAL_CHAIN_NAME!r}, chain ID {FRAXTAL_CHAIN_ID})."
 )
 
 UNISWAP_QUOTE_PROMPT = (

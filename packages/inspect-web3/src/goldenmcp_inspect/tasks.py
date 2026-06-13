@@ -32,6 +32,21 @@ from goldenmcp_inspect.scorers import score_transcript
 logger = logging.getLogger(__name__)
 
 
+def _parse_json(text: str):
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def _usage_tokens(usage) -> int:
+    """Token count from an Inspect ModelUsage, tolerant of which fields are set."""
+    total = getattr(usage, "total_tokens", None)
+    if total:
+        return total
+    return (getattr(usage, "input_tokens", 0) or 0) + (getattr(usage, "output_tokens", 0) or 0)
+
+
 def _make_transcript_scorer(mcp: str, capability: str) -> Scorer:
     benchmark = load_benchmark(mcp, capability)
 
@@ -40,6 +55,7 @@ def _make_transcript_scorer(mcp: str, capability: str) -> Scorer:
         async def score(state, target):
             events = []
             total_tokens = 0
+            structured: dict = {}
             for msg in state.messages:
                 if hasattr(msg, "tool_calls") and msg.tool_calls:
                     for tc in msg.tool_calls:
@@ -50,15 +66,21 @@ def _make_transcript_scorer(mcp: str, capability: str) -> Scorer:
                                 content=json.dumps(tc.arguments) if tc.arguments else "",
                             )
                         )
+                # Merge structured tool *results* so DataScore can match expected_data
+                # keys against real tool output (not just the completion text).
+                if getattr(msg, "role", None) == "tool":
+                    parsed = _parse_json(getattr(msg, "text", "") or "")
+                    if isinstance(parsed, dict):
+                        structured.update(parsed)
                 if hasattr(msg, "usage") and msg.usage:
-                    total_tokens += getattr(msg.usage, "total_tokens", 0) or 0
+                    total_tokens += _usage_tokens(msg.usage)
 
             output_text = state.output.completion if state.output else ""
             transcript = EvalTranscript(
                 mcp=mcp,
                 capability=capability,
                 events=events,
-                final_output={"text": output_text},
+                final_output={**structured, "text": output_text},
                 total_tokens=total_tokens,
             )
             result = score_transcript(transcript, benchmark)

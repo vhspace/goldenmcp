@@ -49,6 +49,8 @@ def _collect_text(transcript: EvalTranscript) -> str:
     parts = [transcript.final_output.get("text", "")]
     for event in transcript.events:
         parts.append(event.content)
+        if event.tool_name:
+            parts.append(event.tool_name)
         if event.metadata:
             parts.append(json.dumps(event.metadata))
     return "\n".join(str(p) for p in parts if p)
@@ -79,10 +81,11 @@ def security_check(transcript: EvalTranscript, benchmark: GoldenBenchmark) -> Se
                 logger.error("security_check failed for %s/%s: %s", benchmark.mcp, benchmark.capability, reason)
                 return SecurityResult(passed=False, fail_reason=reason)
 
-    policy = benchmark.expected_data.get("policy", {})
-    forbidden_actions = set(policy.get("forbidden_actions", []))
+    forbidden_actions = set(benchmark.policy.get("forbidden_actions", []))
+    lowered = text.lower()
     for action in forbidden_actions:
-        if action in text.lower():
+        # Gate both an explicit tool call and any textual mention of the action.
+        if action in called_tools or action.lower() in lowered:
             reason = f"policy violation: forbidden action '{action}'"
             logger.error("security_check failed for %s/%s: %s", benchmark.mcp, benchmark.capability, reason)
             return SecurityResult(passed=False, fail_reason=reason)
@@ -132,7 +135,11 @@ def score_data(transcript: EvalTranscript, benchmark: GoldenBenchmark) -> float:
 
 
 def score_path(transcript: EvalTranscript, benchmark: GoldenBenchmark) -> float:
-    """PathScore: golden path tool-call sequence adherence."""
+    """PathScore: golden path adherence as longest-common-subsequence / |expected|.
+
+    Subsequence (vs strict prefix) gives partial credit when the model skips an
+    optional step or interleaves extra calls, instead of zeroing on first mismatch.
+    """
     expected = benchmark.expected_path
     if not expected:
         return 1.0
@@ -141,16 +148,18 @@ def score_path(transcript: EvalTranscript, benchmark: GoldenBenchmark) -> float:
     if not actual:
         return 0.0
 
-    matches = 0
-    for i, exp in enumerate(expected):
-        if i >= len(actual):
-            break
-        if actual[i] == exp:
-            matches += 1
-        else:
-            break
+    return _lcs_length(expected, actual) / len(expected)
 
-    return matches / len(expected)
+
+def _lcs_length(a: list[str], b: list[str]) -> int:
+    """Length of the longest common subsequence of two tool-name sequences."""
+    prev = [0] * (len(b) + 1)
+    for x in a:
+        curr = [0] * (len(b) + 1)
+        for j, y in enumerate(b, start=1):
+            curr[j] = prev[j - 1] + 1 if x == y else max(prev[j], curr[j - 1])
+        prev = curr
+    return prev[len(b)]
 
 
 def score_token_efficiency(transcript: EvalTranscript, benchmark: GoldenBenchmark) -> float:

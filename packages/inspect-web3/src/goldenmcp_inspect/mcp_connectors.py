@@ -11,12 +11,13 @@ from inspect_ai.tool import mcp_server_http, mcp_server_stdio
 logger = logging.getLogger(__name__)
 
 def _stdio_wrapper(inner: str) -> tuple[str, ...]:
-    """Wrap a stdio MCP launch so only JSON-RPC lines reach the client.
+    """Wrap a stdio MCP launch so only JSON-RPC lines reach the client on stdout.
 
-    npx/node servers often print banners and warnings to stdout; the grep
-    keeps only lines beginning with `{`/`[` so the MCP framing stays clean.
+    MCP stdio framing is newline-delimited JSON, so keeping only lines beginning
+    with `{`/`[` strips any banner a misbehaving server prints to stdout. stderr is
+    deliberately left intact (servers are told to log there) for debuggability.
     """
-    return ("-c", f"exec {inner} 2>/dev/null | grep --line-buffered -E '^[{{[]'")
+    return ("-c", f"{inner} | grep --line-buffered -E '^[{{[]'")
 
 
 ODOS_STDIO_COMMAND = "bash"
@@ -61,6 +62,16 @@ def _require_env(name: str) -> str:
     return value
 
 
+def _optional_env(mapping: dict[str, str]) -> dict[str, str]:
+    """Build a child-process env from {source_var: target_var}, skipping unset sources."""
+    out: dict[str, str] = {}
+    for source, target in mapping.items():
+        value = os.environ.get(source, "")
+        if value:
+            out[target] = value
+    return out
+
+
 def odos_stdio_env(*, require_wallet: bool) -> dict[str, str]:
     wallet = os.environ.get("WALLET_PRIVATE_KEY", "")
     if require_wallet and not wallet:
@@ -82,16 +93,13 @@ def odos_stdio_config(*, require_wallet: bool = False) -> StdioMcpConfig:
 
 
 def jupiter_stdio_env() -> dict[str, str]:
-    """Env for the read-only Jupiter price/portfolio MCP (no keypair needed)."""
-    env: dict[str, str] = {}
-    api_key = os.environ.get("JUPITER_API_KEY", "")
-    if api_key:
-        env["JUPITER_API_KEY"] = api_key
-    # Our convention is SOLANA_RPC_URL; the server reads SOLANA_RPC_ENDPOINT.
-    rpc = os.environ.get("SOLANA_RPC_URL", "")
-    if rpc:
-        env["SOLANA_RPC_ENDPOINT"] = rpc
-    return env
+    """Env for the read-only Jupiter price/portfolio MCP (no keypair needed).
+
+    Our convention is SOLANA_RPC_URL; the server reads SOLANA_RPC_ENDPOINT.
+    """
+    return _optional_env(
+        {"JUPITER_API_KEY": "JUPITER_API_KEY", "SOLANA_RPC_URL": "SOLANA_RPC_ENDPOINT"}
+    )
 
 
 def jupiter_stdio_config() -> StdioMcpConfig:
@@ -106,10 +114,7 @@ def jupiter_stdio_config() -> StdioMcpConfig:
 def kyberswap_stdio_config() -> StdioMcpConfig:
     """KyberSwap MCP launched from a locally built dist (KYBERSWAP_MCP_PATH)."""
     path = _require_env("KYBERSWAP_MCP_PATH")
-    env: dict[str, str] = {}
-    rpc = os.environ.get("KYBERSWAP_RPC_URL", "")
-    if rpc:
-        env["RPC_URL"] = rpc
+    env = _optional_env({"KYBERSWAP_RPC_URL": "RPC_URL"})
     return StdioMcpConfig(
         command=KYBERSWAP_STDIO_COMMAND,
         args=list(_stdio_wrapper(f'node "{path}"')),

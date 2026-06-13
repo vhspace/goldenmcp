@@ -23,6 +23,13 @@ def test_at_least_nine_task_runs():
     assert len(BENCHMARKS) >= 9
 
 
+def test_policy_is_loaded_from_golden_yaml():
+    # Regression: top-level `policy:` must survive loading (it used to be dropped,
+    # silently disabling the forbidden-actions security gate).
+    benchmark = load_benchmark("odos", "quote")
+    assert "ODOS_SWAP" in benchmark.policy.get("forbidden_actions", [])
+
+
 def _value_for_spec(spec: Any) -> Any:
     if isinstance(spec, dict):
         if "min" in spec:

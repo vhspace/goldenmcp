@@ -11,8 +11,6 @@ from goldenmcp_inspect.schemas import GoldenBenchmark
 
 logger = logging.getLogger(__name__)
 
-BENCHMARKS_ROOT = Path(__file__).resolve().parents[4] / "benchmarks" / "golden"
-
 
 def golden_path() -> Path:
     env_root = Path(__file__).resolve().parents[4]
