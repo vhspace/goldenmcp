@@ -52,6 +52,25 @@ See [docs/scoring.md](docs/scoring.md).
 
 All implementation plans: [docs/plans/](docs/plans/)
 
+## Agent skills (Chainlink)
+
+Project-local [Chainlink Developer Agent Skills](https://docs.chain.link/resources/chainlink-developer-agent-skills) from `smartcontractkit/chainlink-agent-skills`:
+
+| Path | Agent |
+|------|-------|
+| `.agents/skills/` | Cursor |
+| `.claude/skills/` | Claude Code (this repo) |
+
+Installed skills: CRE, Confidential AI Attester, CCIP, Data Feeds, Data Streams, ACE, VRF. Pin file: `skills-lock.json`.
+
+Invoke explicitly in chat, e.g. `Using /chainlink-cre-skill, …` or `/chainlink-confidential-ai-attester-skill` for CAI attestation work.
+
+Refresh from upstream:
+
+```bash
+npx skills add smartcontractkit/chainlink-agent-skills --skill '*' --agent cursor --agent claude-code -y --copy
+```
+
 ## Structure
 
 ```
