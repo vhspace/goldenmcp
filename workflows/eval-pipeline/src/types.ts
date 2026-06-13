@@ -8,6 +8,8 @@ export interface Config {
   arcChainSelector: string;
   defaultAgentId: number;
   useScoreOnly: boolean;
+  /** Busy-wait between poll attempts in cre workflow simulate (runtime.sleep traps). */
+  pollBusyWait?: boolean;
   /** When set, cron/simulate only runs these `mcp/capability` pairs (required for useScoreOnly fixture). */
   benchmarkAllowlist?: string[];
   caiPollMaxAttempts: number;

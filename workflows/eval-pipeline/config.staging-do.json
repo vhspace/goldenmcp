@@ -1,0 +1,19 @@
+{
+  "schedule": "0 */6 * * *",
+  "evalRunnerUrl": "http://159.203.78.85",
+  "evalRunnerApiKey": "",
+  "chainlinkCaiUrl": "",
+  "walrusAggregatorUrl": "https://aggregator.walrus-testnet.walrus.space",
+  "arcRegistryAddress": "",
+  "arcChainSelector": "arc-testnet",
+  "defaultAgentId": 1,
+  "useScoreOnly": false,
+  "pollBusyWait": true,
+  "benchmarkAllowlist": ["lifi/quote"],
+  "caiPollMaxAttempts": 60,
+  "caiPollIntervalMs": 2000,
+  "inspectPollMaxAttempts": 300,
+  "inspectPollIntervalMs": 2000,
+  "publishPollMaxAttempts": 60,
+  "publishPollIntervalMs": 2000
+}
