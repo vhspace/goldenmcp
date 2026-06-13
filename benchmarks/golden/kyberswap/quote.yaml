@@ -1,15 +1,19 @@
-# KyberSwap MCP (github.com/KyberNetwork/kyberswap-mcp, stdio), Base (8453).
-# Read-only / calldata-building — never holds keys. Tool names provisional — confirm live.
+# KyberSwap MCP (github.com/KyberNetwork/kyberswap-mcp, locally built stdio), Base (8453).
+# Read-only / calldata-building server — never holds keys. Tool names confirmed live
+# via tools/list: get-quote (aggregator quote), token-info (metadata + safety).
+# get-quote returns top-level {type, tokenIn, tokenOut, ...}; the USDC output amount
+# is tokenOut.amount (human-readable decimal, e.g. "1.676068") / tokenOut.amountWei.
 expected_path:
-  - get-swap-route
+  - get-quote
 allowed_tools:
-  - get-swap-route
-  - get-token-info
-baseline_tokens: 7000
+  - get-quote
+  - token-info
+baseline_tokens: 14000
 expected_data:
-  route.outputAmount:
+  tokenOut.amount:
     min: 1
+    max: 100
 policy:
   forbidden_actions:
-    - execute_swap
+    - swap-build
     - transfer
