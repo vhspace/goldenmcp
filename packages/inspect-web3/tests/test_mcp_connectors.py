@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import urllib.parse
+
 import pytest
 
 from goldenmcp_inspect.mcp_connectors import (
@@ -31,10 +33,37 @@ def test_odos_stdio_env_requires_wallet_for_swap(monkeypatch):
         odos_stdio_env(require_wallet=True)
 
 
-def test_odos_stdio_env_passes_wallet(monkeypatch):
+def test_odos_stdio_env_strips_0x_prefix(monkeypatch):
+    # @iqai/mcp-odos's viem parser wants the bare hex key, not 0x-prefixed.
     monkeypatch.setenv("WALLET_PRIVATE_KEY", "0xabc")
     env = odos_stdio_env(require_wallet=False)
-    assert env["WALLET_PRIVATE_KEY"] == "0xabc"
+    assert env["WALLET_PRIVATE_KEY"] == "abc"
+
+
+def test_odos_stdio_env_passes_bare_wallet_unchanged(monkeypatch):
+    monkeypatch.setenv("WALLET_PRIVATE_KEY", "abc")
+    monkeypatch.delenv("ODOS_API_KEY", raising=False)
+    env = odos_stdio_env(require_wallet=False)
+    assert env["WALLET_PRIVATE_KEY"] == "abc"
+    # No key set → no preload, so the package hits the public (rate-limited) API.
+    assert "ODOS_API_KEY" not in env
+    assert "NODE_OPTIONS" not in env
+
+
+def test_odos_stdio_env_injects_api_key_via_node_import(monkeypatch):
+    # @iqai/mcp-odos has no key hook, so we pass the key to the child and preload a
+    # Node fetch shim (via --import) that adds the x-api-key header for api.odos.xyz.
+    monkeypatch.setenv("WALLET_PRIVATE_KEY", "abc")
+    monkeypatch.setenv("ODOS_API_KEY", "uuid-key-123")
+    env = odos_stdio_env(require_wallet=False)
+    assert env["ODOS_API_KEY"] == "uuid-key-123"
+    node_options = env["NODE_OPTIONS"]
+    assert node_options.startswith("--import data:text/javascript,")
+    # Shim must read the key from env (never inlined) and target the Odos host.
+    assert "uuid-key-123" not in node_options
+    assert "ODOS_API_KEY" in urllib.parse.unquote(node_options)
+    assert "api.odos.xyz" in urllib.parse.unquote(node_options)
+    assert "x-api-key" in urllib.parse.unquote(node_options)
 
 
 def test_lifi_http_requires_url(monkeypatch):

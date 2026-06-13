@@ -215,11 +215,28 @@ def score_transcript(transcript: EvalTranscript, benchmark: GoldenBenchmark) -> 
 
 
 def _get_nested(data: dict[str, Any], keys: list[str]) -> Any:
+    """Descend dicts by key; a numeric segment indexes into a list.
+
+    e.g. path ``outAmounts.0`` -> ``data["outAmounts"][0]``. Returns None on a
+    missing key, an out-of-range index, or a type mismatch (e.g. numeric segment
+    against a non-list, or string key against a non-dict).
+    """
     current: Any = data
     for key in keys:
-        if not isinstance(current, dict) or key not in current:
+        if isinstance(current, list):
+            try:
+                index = int(key)
+            except ValueError:
+                return None
+            if index < 0 or index >= len(current):
+                return None
+            current = current[index]
+        elif isinstance(current, dict):
+            if key not in current:
+                return None
+            current = current[key]
+        else:
             return None
-        current = current[key]
     return current
 
 
