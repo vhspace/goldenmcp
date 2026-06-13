@@ -36,10 +36,30 @@ logger = logging.getLogger(__name__)
 
 
 def _parse_json(text: str):
+    """Parse a tool result into a dict for DataScore matching.
+
+    Most servers return a JSON object. Some (e.g. @iqai/mcp-odos) return a
+    human-formatted text blob with an embedded JSON object — recover the largest
+    top-level `{...}` substring so keys like `outAmounts` are still matchable.
+    """
     try:
-        return json.loads(text)
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
     except (json.JSONDecodeError, TypeError):
+        pass
+
+    if not isinstance(text, str):
         return None
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    try:
+        candidate = json.loads(text[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+    return candidate if isinstance(candidate, dict) else None
 
 
 def _make_transcript_scorer(mcp: str, capability: str) -> Scorer:

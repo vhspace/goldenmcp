@@ -107,6 +107,46 @@ def test_data_score_passes():
     assert score_data(transcript, _benchmark()) == 1.0
 
 
+def test_data_score_indexes_into_list_with_numeric_segment():
+    # Mirrors the real Odos shape: output amount at top-level `outAmounts`, a list
+    # of stringified base-unit amounts. Path `outAmounts.0` must index element 0
+    # and the min check must coerce the stringified number.
+    benchmark = GoldenBenchmark(
+        mcp="odos",
+        capability="quote",
+        expected_path=["ODOS_GET_QUOTE"],
+        allowed_tools=["ODOS_GET_QUOTE"],
+        baseline_tokens=1000,
+        expected_data={"outAmounts.0": {"min": 1}},
+    )
+    transcript = EvalTranscript(
+        mcp="odos",
+        capability="quote",
+        events=[],
+        final_output={"outAmounts": ["1675763"]},
+    )
+    assert score_data(transcript, benchmark) == 1.0
+
+
+def test_data_score_missing_list_index_scores_zero():
+    # Out-of-range index -> _get_nested returns None -> min check fails -> 0 score.
+    benchmark = GoldenBenchmark(
+        mcp="odos",
+        capability="quote",
+        expected_path=["ODOS_GET_QUOTE"],
+        allowed_tools=["ODOS_GET_QUOTE"],
+        baseline_tokens=1000,
+        expected_data={"outAmounts.0": {"min": 1}},
+    )
+    transcript = EvalTranscript(
+        mcp="odos",
+        capability="quote",
+        events=[],
+        final_output={"outAmounts": []},
+    )
+    assert score_data(transcript, benchmark) == 0.0
+
+
 def test_token_efficiency():
     transcript = EvalTranscript(mcp="lifi", capability="quote", total_tokens=500)
     assert score_token_efficiency(transcript, _benchmark()) == 0.5
