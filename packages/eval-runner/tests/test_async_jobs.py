@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from goldenmcp_eval_runner.app import app
-from goldenmcp_eval_runner.jobs import eval_jobs, JobStatus
+from goldenmcp_eval_runner.jobs import eval_jobs
 from goldenmcp_eval_runner.pending_runs import cai_callbacks
 from goldenmcp_eval_runner.settings import get_settings
 
@@ -53,6 +53,50 @@ def _sample_transcript_payload() -> dict:
     }
 
 
+class _FakeProc:
+    def __init__(self, returncode: int, stdout: str = "", stderr: str = ""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def _patch_inspect_subprocess(
+    monkeypatch,
+    *,
+    returncode: int = 0,
+    log_path: str = "/tmp/goldenmcp_lifi_quote.eval",
+    log_data: dict | None = None,
+    raw: bytes = b'{"eval": "raw-log-bytes"}',
+    stderr: str = "",
+) -> None:
+    """Stub the per-eval subprocess + log read in the app module.
+
+    The app spawns `python -m goldenmcp_eval_runner.inspect_runner`, which prints
+    {"log_path": ...}; the parent then reads the .eval via read_inspect_log_file.
+    """
+    import json as _json
+
+    app_module = _app_module()
+    stdout = _json.dumps({"log_path": log_path}) if returncode == 0 else ""
+    monkeypatch.setattr(
+        app_module.subprocess,
+        "run",
+        lambda *a, **k: _FakeProc(returncode, stdout=stdout, stderr=stderr),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "read_inspect_log_file",
+        lambda path: (log_data if log_data is not None else {"status": "success"}, raw),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "transcript_from_inspect_log",
+        lambda log_data, mcp, capability: __import__(
+            "goldenmcp_inspect.schemas", fromlist=["EvalTranscript"]
+        ).EvalTranscript(mcp=mcp, capability=capability),
+    )
+
+
 def _poll_until(client, run_id: str, target_status: str, timeout_s: float = 5.0) -> dict:
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
@@ -71,21 +115,7 @@ def test_get_eval_runs_404_for_unknown_id(client):
 
 
 def test_async_inspect_returns_202_then_poll_until_scored(client, monkeypatch):
-    app_module = _app_module()
-
-    fake_log = b'{"eval": "raw-log-bytes"}'
-
-    def fake_run_inspect(**kwargs):
-        return "/tmp/goldenmcp_lifi_quote.eval", {"status": "success"}, fake_log
-
-    monkeypatch.setattr(app_module, "run_inspect_eval", fake_run_inspect)
-    monkeypatch.setattr(
-        app_module,
-        "transcript_from_inspect_log",
-        lambda log_data, mcp, capability: __import__(
-            "goldenmcp_inspect.schemas", fromlist=["EvalTranscript"]
-        ).EvalTranscript(mcp=mcp, capability=capability),
-    )
+    _patch_inspect_subprocess(monkeypatch)
 
     response = client.post(
         "/eval/inspect",
@@ -104,12 +134,8 @@ def test_async_inspect_returns_202_then_poll_until_scored(client, monkeypatch):
 
 
 def test_failed_inspect_sets_status_failed_with_error(client, monkeypatch):
-    app_module = _app_module()
-
-    def fake_run_inspect(**kwargs):
-        raise RuntimeError("inspect eval failed: boom")
-
-    monkeypatch.setattr(app_module, "run_inspect_eval", fake_run_inspect)
+    # Subprocess exits non-zero with a stderr message → job must fail loudly.
+    _patch_inspect_subprocess(monkeypatch, returncode=1, stderr="inspect eval failed: boom")
 
     response = client.post(
         "/eval/inspect",
@@ -121,7 +147,8 @@ def test_failed_inspect_sets_status_failed_with_error(client, monkeypatch):
 
     final = _poll_until(client, run_id, "failed")
     assert final["status"] == "failed"
-    assert final["error"]
+    # The subprocess stderr must be surfaced in the job error (fail loudly).
+    assert "boom" in final["error"]
 
 
 def test_async_publish_returns_202_then_poll_until_published(client, monkeypatch):
@@ -167,9 +194,7 @@ def test_async_publish_returns_202_then_poll_until_published(client, monkeypatch
 def test_async_publish_from_inspect_preserves_log_bytes(client, monkeypatch):
     app_module = _app_module()
     fake_log = b'{"eval": "raw-log-bytes"}'
-
-    def fake_run_inspect(**kwargs):
-        return "/tmp/goldenmcp_lifi_quote.eval", {"status": "success"}, fake_log
+    _patch_inspect_subprocess(monkeypatch, raw=fake_log)
 
     captured: dict = {}
 
@@ -184,14 +209,6 @@ def test_async_publish_from_inspect_preserves_log_bytes(client, monkeypatch):
             walrus_eval_blob_id="e",
         )
 
-    monkeypatch.setattr(app_module, "run_inspect_eval", fake_run_inspect)
-    monkeypatch.setattr(
-        app_module,
-        "transcript_from_inspect_log",
-        lambda log_data, mcp, capability: __import__(
-            "goldenmcp_inspect.schemas", fromlist=["EvalTranscript"]
-        ).EvalTranscript(mcp=mcp, capability=capability),
-    )
     monkeypatch.setattr(app_module, "publish_manifest_to_walrus", fake_publish)
 
     inspect_response = client.post(
