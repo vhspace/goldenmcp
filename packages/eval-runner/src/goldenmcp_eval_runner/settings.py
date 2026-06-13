@@ -15,6 +15,7 @@ class RunnerSettings(BaseSettings):
     eval_runner_api_key: str | None = None
     cai_webhook_secret: str | None = None
     eval_inspect_timeout: int = 600
+    eval_inspect_model: str = "together/google/gemma-4-31B-it"
 
 
 @lru_cache

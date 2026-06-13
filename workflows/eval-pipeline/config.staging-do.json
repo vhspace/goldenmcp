@@ -1,6 +1,6 @@
 {
   "schedule": "0 */6 * * *",
-  "evalRunnerUrl": "https://159.203.78.85",
+  "evalRunnerUrl": "http://159.203.78.85",
   "evalRunnerApiKey": "",
   "chainlinkCaiUrl": "",
   "walrusAggregatorUrl": "https://aggregator.walrus-testnet.walrus.space",
@@ -8,6 +8,7 @@
   "arcChainSelector": "arc-testnet",
   "defaultAgentId": 1,
   "useScoreOnly": false,
+  "pollBusyWait": true,
   "benchmarkAllowlist": ["lifi/quote"],
   "caiPollMaxAttempts": 60,
   "caiPollIntervalMs": 2000,
