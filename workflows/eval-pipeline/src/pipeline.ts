@@ -17,6 +17,7 @@ import type {
 } from "./types";
 
 const httpClient = new HTTPClient();
+const CRE_HTTP_TIMEOUT = "8s";
 
 const MCP_REGISTRY_ABI = parseAbi([
   "function updateCapabilityScore(uint256 agentId, string capability, uint16 dataScoreBps, uint16 pathScoreBps, uint16 tokenEfficiencyBps, uint16 compositeBps, bool failed, string walrusBlobId) external",
@@ -32,6 +33,16 @@ const MINIMAL_SCORE_TRANSCRIPT = {
   final_output: { amount: 1, token: "USDC" },
   total_tokens: 2000,
 };
+
+export interface EvalRunPollResult {
+  run_id: string;
+  status: string;
+  manifest?: ScoreManifest;
+  error?: string;
+  walrus_manifest_blob_id?: string;
+  walrus_eval_blob_id?: string;
+  walrus_index_blob_id?: string;
+}
 
 export function scoreToBps(score: number): number {
   const clamped = Math.max(0, Math.min(1, score));
@@ -52,6 +63,19 @@ export function finalizeCaiPollStatus(status: string, error?: string): void {
   }
   if (status !== "completed") {
     throw new Error(`CAI inference did not complete: status=${status}`);
+  }
+}
+
+export function finalizeEvalRunPollStatus(
+  status: string,
+  targetStatus: string,
+  error?: string,
+): void {
+  if (status === "failed") {
+    throw new Error(`eval run failed: ${error ?? "unknown error"}`);
+  }
+  if (status !== targetStatus) {
+    throw new Error(`eval run did not reach ${targetStatus}: status=${status}`);
   }
 }
 
@@ -101,10 +125,15 @@ export function parseCaiAttestation(output: string): CaiAttestation {
 }
 
 function runtimeSleep(runtime: Runtime<Config>, ms: number): void {
-  const maybeSleep = runtime as Runtime<Config> & { sleep?: (delayMs: number) => void };
-  if (typeof maybeSleep.sleep === "function") {
-    maybeSleep.sleep(ms);
+  // cre workflow simulate (v1.18) traps on runtime.sleep(); useScoreOnly marks simulate config.
+  if (runtime.config.useScoreOnly) {
+    const deadline = runtime.now().getTime() + ms;
+    while (runtime.now().getTime() < deadline) {
+      // busy-wait between poll attempts in local simulate only
+    }
+    return;
   }
+  runtime.sleep(ms);
 }
 
 function authHeaders(token: string): Record<string, string> {
@@ -116,6 +145,11 @@ function jsonAuthHeaders(token: string): Record<string, string> {
     ...authHeaders(token),
     "Content-Type": "application/json",
   };
+}
+
+/** CRE HTTP capability expects request body as base64-encoded bytes on the wire. */
+function encodeHttpBody(payload: string): string {
+  return Buffer.from(payload, "utf8").toString("base64");
 }
 
 export function requireCaiAttestationFields(attestation: CaiAttestation): CaiAttestation {
@@ -130,8 +164,9 @@ export function requireCaiAttestationFields(attestation: CaiAttestation): CaiAtt
 function requireHttpOk(
   response: ReturnType<ReturnType<HTTPClient["sendRequest"]>["result"]>,
   context: string,
+  allowedStatuses: number[] = [200],
 ): string {
-  if (!ok(response)) {
+  if (!ok(response) || !allowedStatuses.includes(response.statusCode)) {
     const body = text(response);
     const snippet = body.length > 500 ? `${body.slice(0, 500)}…` : body;
     throw new Error(`${context}: HTTP ${response.statusCode} — ${snippet}`);
@@ -186,6 +221,98 @@ function resolveChainSelector(config: Config): bigint {
   return selector;
 }
 
+function parseEvalRunPoll(bodyText: string): EvalRunPollResult {
+  return JSON.parse(bodyText) as EvalRunPollResult;
+}
+
+export function pollEvalRunUntilScored(
+  runtime: Runtime<Config>,
+  runId: string,
+  apiKey: string,
+): EvalRunPollResult {
+  const config = runtime.config;
+  const base = config.evalRunnerUrl.replace(/\/$/, "");
+  let lastStatus = "queued";
+
+  for (let attempt = 1; attempt <= config.inspectPollMaxAttempts; attempt++) {
+    const pollResponse = httpClient
+      .sendRequest(runtime, {
+        url: `${base}/eval/runs/${encodeURIComponent(runId)}`,
+        method: "GET",
+        headers: authHeaders(apiKey),
+        timeout: CRE_HTTP_TIMEOUT,
+      })
+      .result();
+    const pollText = requireHttpOk(pollResponse, `eval/runs/${runId} attempt ${attempt}`);
+    const pollParsed = parseEvalRunPoll(pollText);
+    lastStatus = pollParsed.status;
+    runtime.log(
+      `inspect poll attempt=${attempt}/${config.inspectPollMaxAttempts} run_id=${runId} status=${lastStatus}`,
+    );
+
+    if (lastStatus === "scored") {
+      if (!pollParsed.manifest) {
+        throw new Error(`eval run scored but manifest missing run_id=${runId}`);
+      }
+      return pollParsed;
+    }
+
+    if (lastStatus === "failed") {
+      finalizeEvalRunPollStatus(lastStatus, "scored", pollParsed.error);
+    }
+
+    if (attempt < config.inspectPollMaxAttempts) {
+      runtimeSleep(runtime, config.inspectPollIntervalMs);
+    }
+  }
+
+  finalizeEvalRunPollStatus(lastStatus, "scored");
+}
+
+export function pollEvalRunUntilPublished(
+  runtime: Runtime<Config>,
+  runId: string,
+  apiKey: string,
+): EvalRunPollResult {
+  const config = runtime.config;
+  const base = config.evalRunnerUrl.replace(/\/$/, "");
+  let lastStatus = "publishing";
+
+  for (let attempt = 1; attempt <= config.publishPollMaxAttempts; attempt++) {
+    const pollResponse = httpClient
+      .sendRequest(runtime, {
+        url: `${base}/eval/runs/${encodeURIComponent(runId)}`,
+        method: "GET",
+        headers: authHeaders(apiKey),
+        timeout: CRE_HTTP_TIMEOUT,
+      })
+      .result();
+    const pollText = requireHttpOk(pollResponse, `eval/runs/${runId} attempt ${attempt}`);
+    const pollParsed = parseEvalRunPoll(pollText);
+    lastStatus = pollParsed.status;
+    runtime.log(
+      `publish poll attempt=${attempt}/${config.publishPollMaxAttempts} run_id=${runId} status=${lastStatus}`,
+    );
+
+    if (lastStatus === "published") {
+      if (!pollParsed.manifest || !pollParsed.walrus_manifest_blob_id || !pollParsed.walrus_eval_blob_id) {
+        throw new Error(`eval run published but walrus fields missing run_id=${runId}`);
+      }
+      return pollParsed;
+    }
+
+    if (lastStatus === "failed") {
+      finalizeEvalRunPollStatus(lastStatus, "published", pollParsed.error);
+    }
+
+    if (attempt < config.publishPollMaxAttempts) {
+      runtimeSleep(runtime, config.publishPollIntervalMs);
+    }
+  }
+
+  finalizeEvalRunPollStatus(lastStatus, "published");
+}
+
 async function runEvalScore(
   runtime: Runtime<Config>,
   target: PipelineTarget,
@@ -207,8 +334,9 @@ async function runEvalScore(
       .sendRequest(runtime, {
         url: `${base}/eval/score`,
         method: "POST",
-        body,
+        body: encodeHttpBody(body),
         headers: jsonAuthHeaders(apiKey),
+        timeout: CRE_HTTP_TIMEOUT,
       })
       .result();
     const bodyText = requireHttpOk(response, `eval/score ${target.mcp}/${target.capability}`);
@@ -217,18 +345,32 @@ async function runEvalScore(
     return parsed;
   }
 
-  runtime.log(`POST /eval/inspect for ${target.mcp}/${target.capability}`);
+  runtime.log(`POST /eval/inspect (async) for ${target.mcp}/${target.capability}`);
+  const inspectBody = JSON.stringify({
+    mcp: target.mcp,
+    capability: target.capability,
+  });
   const response = httpClient
     .sendRequest(runtime, {
-      url: `${base}/eval/inspect?mcp=${encodeURIComponent(target.mcp)}&capability=${encodeURIComponent(target.capability)}`,
+      url: `${base}/eval/inspect`,
       method: "POST",
-      headers: authHeaders(apiKey),
+      body: encodeHttpBody(inspectBody),
+      headers: jsonAuthHeaders(apiKey),
+      timeout: CRE_HTTP_TIMEOUT,
     })
     .result();
-  const bodyText = requireHttpOk(response, `eval/inspect ${target.mcp}/${target.capability}`);
-  const parsed = JSON.parse(bodyText) as { run_id: string; manifest: ScoreManifest };
-  runtime.log(`eval/inspect run_id=${parsed.run_id} composite=${parsed.manifest.composite}`);
-  return parsed;
+  const bodyText = requireHttpOk(response, `eval/inspect ${target.mcp}/${target.capability}`, [200, 202]);
+  const accepted = JSON.parse(bodyText) as { run_id: string; status: string };
+  if (!accepted.run_id) {
+    throw new Error(`eval/inspect missing run_id: ${bodyText}`);
+  }
+  runtime.log(`eval/inspect queued run_id=${accepted.run_id} status=${accepted.status}`);
+
+  const polled = pollEvalRunUntilScored(runtime, accepted.run_id, apiKey);
+  runtime.log(
+    `eval/inspect scored run_id=${accepted.run_id} composite=${polled.manifest?.composite}`,
+  );
+  return { run_id: accepted.run_id, manifest: polled.manifest! };
 }
 
 export async function caiAttest(
@@ -261,11 +403,12 @@ export async function caiAttest(
     .sendRequest(runtime, {
       url: `${base}/v1/inference`,
       method: "POST",
-      body: submitBody,
+      body: encodeHttpBody(submitBody),
       headers: {
         ...authHeaders(caiApiKey),
         "Content-Type": "application/json",
       },
+      timeout: CRE_HTTP_TIMEOUT,
     })
     .result();
 
@@ -284,6 +427,7 @@ export async function caiAttest(
         url: `${base}/v1/inference/${encodeURIComponent(inferenceId)}`,
         method: "GET",
         headers: authHeaders(caiApiKey),
+        timeout: CRE_HTTP_TIMEOUT,
       })
       .result();
     const pollText = requireHttpOk(pollResponse, `CAI poll ${inferenceId} attempt ${attempt}`);
@@ -335,26 +479,30 @@ export async function publishToWalrus(
     attestation_tx_hash: attestation?.attestation_tx_hash,
   });
 
-  runtime.log(`POST /eval/publish run_id=${runId}`);
+  runtime.log(`POST /eval/publish (async) run_id=${runId}`);
   const response = httpClient
     .sendRequest(runtime, {
       url: `${base}/eval/publish`,
       method: "POST",
-      body,
+      body: encodeHttpBody(body),
       headers: jsonAuthHeaders(apiKey),
+      timeout: CRE_HTTP_TIMEOUT,
     })
     .result();
-  const bodyText = requireHttpOk(response, `eval/publish run_id=${runId}`);
-  const parsed = JSON.parse(bodyText) as {
-    manifest: ScoreManifest;
-    walrus_manifest_blob_id: string;
-    walrus_eval_blob_id: string;
-    walrus_index_blob_id?: string;
-  };
+  const bodyText = requireHttpOk(response, `eval/publish run_id=${runId}`, [200, 202]);
+  const accepted = JSON.parse(bodyText) as { run_id?: string; status?: string };
+  runtime.log(`eval/publish accepted run_id=${runId} status=${accepted.status ?? "published"}`);
+
+  const polled = pollEvalRunUntilPublished(runtime, runId, apiKey);
   runtime.log(
-    `Walrus publish run_id=${runId} manifest_blob=${parsed.walrus_manifest_blob_id} eval_blob=${parsed.walrus_eval_blob_id}`,
+    `Walrus publish run_id=${runId} manifest_blob=${polled.walrus_manifest_blob_id} eval_blob=${polled.walrus_eval_blob_id}`,
   );
-  return parsed;
+  return {
+    manifest: polled.manifest!,
+    walrus_manifest_blob_id: polled.walrus_manifest_blob_id!,
+    walrus_eval_blob_id: polled.walrus_eval_blob_id!,
+    walrus_index_blob_id: polled.walrus_index_blob_id,
+  };
 }
 
 function writeRegistryReport(

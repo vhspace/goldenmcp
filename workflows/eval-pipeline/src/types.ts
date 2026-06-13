@@ -12,6 +12,10 @@ export interface Config {
   benchmarkAllowlist?: string[];
   caiPollMaxAttempts: number;
   caiPollIntervalMs: number;
+  inspectPollMaxAttempts: number;
+  inspectPollIntervalMs: number;
+  publishPollMaxAttempts: number;
+  publishPollIntervalMs: number;
 }
 
 export interface PipelineTarget {

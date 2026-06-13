@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   finalizeCaiPollStatus,
+  finalizeEvalRunPollStatus,
   isCaiConfigured,
   parseCaiAttestation,
   requireCaiAttestationFields,
@@ -103,5 +104,25 @@ describe("parseCaiAttestation", () => {
     expect(requireCaiAttestationFields({ attestation_tx_hash: "0xabc" })).toEqual({
       attestation_tx_hash: "0xabc",
     });
+  });
+});
+
+describe("finalizeEvalRunPollStatus", () => {
+  test("throws when eval run failed", () => {
+    expect(() => finalizeEvalRunPollStatus("failed", "scored", "inspect timeout")).toThrow(
+      /eval run failed/,
+    );
+  });
+
+  test("throws when eval run ends incomplete", () => {
+    expect(() => finalizeEvalRunPollStatus("running", "scored")).toThrow(/did not reach scored/);
+    expect(() => finalizeEvalRunPollStatus("publishing", "published")).toThrow(
+      /did not reach published/,
+    );
+  });
+
+  test("does not throw when target status reached", () => {
+    expect(() => finalizeEvalRunPollStatus("scored", "scored")).not.toThrow();
+    expect(() => finalizeEvalRunPollStatus("published", "published")).not.toThrow();
   });
 });
