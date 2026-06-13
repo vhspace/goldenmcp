@@ -79,7 +79,10 @@ def odos_stdio_env(*, require_wallet: bool) -> dict[str, str]:
             "WALLET_PRIVATE_KEY is not set. Required for Odos swap evals — no mock fallback."
         )
     if wallet:
-        return {"WALLET_PRIVATE_KEY": wallet}
+        # @iqai/mcp-odos requires the key even for a read-only quote, and its viem
+        # parser rejects a 0x-prefixed string ("expected hex or 32 bytes, got
+        # string") — it wants the bare 64-hex-char key. Strip a leading 0x.
+        return {"WALLET_PRIVATE_KEY": wallet[2:] if wallet.startswith("0x") else wallet}
     return {}
 
 
