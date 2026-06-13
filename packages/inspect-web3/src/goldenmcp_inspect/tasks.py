@@ -8,7 +8,7 @@ import logging
 from inspect_ai import Task, task
 from inspect_ai.dataset import Sample
 from inspect_ai.scorer import Scorer, Score, scorer
-from inspect_ai.solver import generate, use_tools
+from inspect_ai.solver import generate, system_message, use_tools
 
 from goldenmcp_inspect.benchmarks import load_benchmark
 from goldenmcp_inspect.eval_chains import (
@@ -22,6 +22,7 @@ from goldenmcp_inspect.eval_chains import (
     ODOS_SWAP_PROMPT,
     ONEINCH_QUOTE_PROMPT,
     ONEINCH_SWAP_PROMPT,
+    SYSTEM_PROMPT,
     UNISWAP_QUOTE_PROMPT,
     UNISWAP_SWAP_PROMPT,
 )
@@ -104,6 +105,7 @@ def _build_task(
     return Task(
         dataset=[Sample(input=prompt)],
         solver=[
+            system_message(SYSTEM_PROMPT),
             use_tools(build_mcp_server(mcp, require_wallet=require_wallet)),
             generate(),
         ],

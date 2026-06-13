@@ -1,7 +1,7 @@
-"""Chain defaults for live MCP eval tasks.
+"""Chain defaults, solver system prompt, and per-task prompts for live MCP evals.
 
-Quote evals use Base mainnet (8453) across vendors for comparability.
-Swap evals use the chain each MCP executes on (Fraxtal for Odos).
+Quote evals use Base mainnet (8453) across EVM vendors for comparability.
+Jupiter runs on Solana (a separate, non-comparable track).
 """
 
 from __future__ import annotations
@@ -15,66 +15,84 @@ FRAXTAL_CHAIN_NAME = "fraxtal"
 # Small amounts to limit mainnet spend during evals.
 EVAL_ETH_AMOUNT = "0.001"
 
-# Prompts are deliberately intent-level and do NOT name the tools to call: the
-# model must choose the tool trajectory from the MCP's tool descriptions, so
-# PathScore measures planning rather than instruction-copying.
+# Solver system prompt — sets the read-only stage and the answer contract once,
+# for every task. Because each eval attaches exactly one MCP, the per-task prompts
+# below do NOT name the MCP (redundant and biasing) and do NOT name the tools to
+# call (the model plans the trajectory from tool descriptions, so PathScore
+# measures planning rather than transcription).
+SYSTEM_PROMPT = (
+    "You answer questions using ONLY the attached MCP tools. Read the tool descriptions and "
+    "input schemas carefully and call the most specific tool for the task with correctly typed "
+    "arguments. This is strictly read-only/quote-only: never execute, sign, build, or submit a "
+    "transaction or swap. When you have the answer, submit a concise final response containing "
+    "the numeric answer as a plain decimal number (or an explicit statement that the answer "
+    "could not be determined). Do not guess or invent values."
+)
+
+# K=3 model ensemble. Each task runs on all three; the Chainlink CRE judge
+# validates the aggregated final score inside the TEE.
+# NOTE: confirm the exact Together slug for MiniMax before a live run.
+EVAL_MODELS = [
+    "anthropic/claude-haiku-4-5-20251001",
+    "together/meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    "together/MiniMaxAI/MiniMax-M2.7",
+]
+
+# --- EVM quote prompts (Base) ---
 LIFI_QUOTE_PROMPT = (
-    f"Using the LI.FI MCP server, get a quote to swap {EVAL_ETH_AMOUNT} ETH for USDC "
-    f"on Base (chain ID {BASE_CHAIN_ID}). Report the expected USDC output amount."
+    f"How much USDC is received when swapping {EVAL_ETH_AMOUNT} ETH to USDC on "
+    f"Base (chain ID {BASE_CHAIN_ID})?"
 )
 
 LIFI_ROUTE_PROMPT = (
-    f"Using the LI.FI MCP server, find the best route to move {EVAL_ETH_AMOUNT} ETH "
-    f"into USDC on Base (chain ID {BASE_CHAIN_ID}) and report the route steps."
+    f"Using the best available route, how much USDC is received when swapping "
+    f"{EVAL_ETH_AMOUNT} ETH to USDC on Base (chain ID {BASE_CHAIN_ID})?"
 )
 
 ODOS_QUOTE_PROMPT = (
-    f"Using the Odos MCP server, get a swap quote for {EVAL_ETH_AMOUNT} ETH to USDC "
-    f"on Base (chain name {BASE_CHAIN_NAME!r}, chain ID {BASE_CHAIN_ID}). "
-    "Report the expected output amount."
-)
-
-ODOS_SWAP_PROMPT = (
-    f"Using the Odos MCP server, quote and execute a tiny {EVAL_ETH_AMOUNT} ETH to "
-    f"USDC swap on Fraxtal (chain name {FRAXTAL_CHAIN_NAME!r}, chain ID {FRAXTAL_CHAIN_ID})."
+    f"How much USDC is received when swapping {EVAL_ETH_AMOUNT} ETH to USDC on "
+    f"Base (chain name {BASE_CHAIN_NAME!r}, chain ID {BASE_CHAIN_ID})?"
 )
 
 UNISWAP_QUOTE_PROMPT = (
-    f"Use the Uniswap MCP to quote {EVAL_ETH_AMOUNT} ETH to USDC on "
-    f"Base (chain ID {BASE_CHAIN_ID})."
-)
-
-UNISWAP_SWAP_PROMPT = (
-    f"Use the Uniswap MCP to quote and execute a tiny ETH to USDC swap on "
-    f"Base (chain ID {BASE_CHAIN_ID})."
+    f"How much USDC is received when swapping {EVAL_ETH_AMOUNT} ETH to USDC on "
+    f"Base (chain ID {BASE_CHAIN_ID})?"
 )
 
 ONEINCH_QUOTE_PROMPT = (
-    f"Use the 1inch MCP to get a swap quote for {EVAL_ETH_AMOUNT} ETH to USDC on "
-    f"Base (chain ID {BASE_CHAIN_ID}). Return the quote details."
-)
-
-ONEINCH_SWAP_PROMPT = (
-    f"Use the 1inch MCP to get a quote and build a tiny ETH to USDC swap on "
-    f"Base (chain ID {BASE_CHAIN_ID}). 1inch is non-custodial — return the swap "
-    "transaction for the caller to sign; do not broadcast."
+    f"How much USDC is received when swapping {EVAL_ETH_AMOUNT} ETH to USDC on "
+    f"Base (chain ID {BASE_CHAIN_ID})?"
 )
 
 KYBERSWAP_QUOTE_PROMPT = (
-    f"Use the KyberSwap MCP to get a swap quote (route) for {EVAL_ETH_AMOUNT} ETH to "
-    f"USDC on Base (chain ID {BASE_CHAIN_ID}). Return the quote details."
+    f"Using the best available route, how much USDC is received when swapping "
+    f"{EVAL_ETH_AMOUNT} ETH to USDC on Base (chain ID {BASE_CHAIN_ID})?"
+)
+
+# --- Build/execute prompts (PENDING read-only-scope decision) ---
+# These conflict with the strictly read-only SYSTEM_PROMPT above and are kept only
+# so the task imports stay valid until the lineup decision is made.
+ODOS_SWAP_PROMPT = (
+    f"Quote and execute a tiny {EVAL_ETH_AMOUNT} ETH to USDC swap on "
+    f"Fraxtal (chain name {FRAXTAL_CHAIN_NAME!r}, chain ID {FRAXTAL_CHAIN_ID})."
+)
+
+UNISWAP_SWAP_PROMPT = (
+    f"Quote and execute a tiny {EVAL_ETH_AMOUNT} ETH to USDC swap on "
+    f"Base (chain ID {BASE_CHAIN_ID})."
+)
+
+ONEINCH_SWAP_PROMPT = (
+    f"Build (do not broadcast) a tiny {EVAL_ETH_AMOUNT} ETH to USDC swap transaction "
+    f"on Base (chain ID {BASE_CHAIN_ID}) for the caller to sign."
 )
 
 KYBERSWAP_ROUTE_PROMPT = (
-    f"Use the KyberSwap MCP to find and build the best route for {EVAL_ETH_AMOUNT} ETH "
-    f"to USDC on Base (chain ID {BASE_CHAIN_ID}). KyberSwap is read-only — return the "
-    "route and built calldata; do not broadcast."
+    f"Find and build the best route (calldata only, do not broadcast) for swapping "
+    f"{EVAL_ETH_AMOUNT} ETH to USDC on Base (chain ID {BASE_CHAIN_ID})."
 )
 
-# --- Solana track (Jupiter) ---
-# Solana has no EVM chain ID; tokens are identified by mint address. Jupiter quotes
-# are NOT comparable to EVM Base quotes — scoring is per-benchmark, so this is a
-# separate track rather than a reuse of the Base constants above.
+# --- Solana track (Jupiter) — read-only price/portfolio ---
 SOLANA_CHAIN_NAME = "solana"
 SOL_MINT = "So11111111111111111111111111111111111111112"
 USDC_SOL_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
@@ -82,12 +100,11 @@ USDC_SOL_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 SAMPLE_SOLANA_WALLET = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
 
 JUPITER_QUOTE_PROMPT = (
-    "Use the Jupiter MCP to get the current price of SOL "
-    f"(mint {SOL_MINT}) denominated in USDC (mint {USDC_SOL_MINT}) on Solana. "
-    "Return the price."
+    f"What is the current price of SOL (mint {SOL_MINT}) in USDC "
+    f"(mint {USDC_SOL_MINT}) on Solana?"
 )
 
 JUPITER_POSITIONS_PROMPT = (
-    "Use the Jupiter MCP to list the token positions held by Solana wallet "
-    f"{SAMPLE_SOLANA_WALLET}. Return the positions."
+    f"How many distinct token positions does Solana wallet {SAMPLE_SOLANA_WALLET} "
+    "currently hold?"
 )
