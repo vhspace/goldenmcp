@@ -54,6 +54,23 @@ class DimensionScores(BaseModel):
     token_efficiency: float = 0.0
 
 
+class CaiAttestation(BaseModel):
+    """A completed Confidential AI (TEE) inference — this IS the attestation.
+
+    The TEE inference itself is the proof: a known model ran on the manifest
+    inside the enclave. The inference id is the handle; the output is the verdict.
+    """
+
+    inference_id: str
+    model: str = "gemma4"
+    verdict: str = ""
+    # 0x-prefixed bytes32 response digest from the TEE; the onchain transcript hash.
+    transcript_hash: str | None = None
+    completed_at: str | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+
+
 class ScoreManifest(BaseModel):
     schema_version: str = "goldenmcp/score-manifest/v1"
     mcp: str
@@ -68,8 +85,9 @@ class ScoreManifest(BaseModel):
     composite: float = 0.0
     walrus_blob_id: str | None = None
     walrus_manifest_blob_id: str | None = None
+    # CAI inference id, mirrored onchain via recordAttestation as the reference.
     attestation_id: str | None = None
-    attestation_tx_hash: str | None = None
+    attestation: CaiAttestation | None = None
     ens_name: str | None = None
 
     def to_public_dict(self) -> dict[str, Any]:

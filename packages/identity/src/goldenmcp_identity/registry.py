@@ -52,7 +52,8 @@ REGISTRY_ABI = [
                     {"name": "mcpEndpoint", "type": "string"},
                     {"name": "agentUri", "type": "string"},
                     {"name": "ensName", "type": "string"},
-                    {"name": "lastAttestationTx", "type": "string"},
+                    {"name": "lastAttestationId", "type": "string"},
+                    {"name": "lastTranscriptHash", "type": "bytes32"},
                     {"name": "exists", "type": "bool"},
                 ],
                 "name": "",
@@ -115,7 +116,9 @@ class MCPRegistration(BaseModel):
     mcp_endpoint: str
     agent_uri: str
     ens_name: str
-    last_attestation_tx: str = ""
+    # CAI inference id + bytes32 transcript hash (response digest) of the last attestation.
+    last_attestation_id: str = ""
+    last_transcript_hash: str = ""
 
 
 def score_to_bps(score: float) -> int:
@@ -208,7 +211,8 @@ class RegistryClient:
             mcp_endpoint=rec[1],
             agent_uri=rec[2],
             ens_name=rec[3],
-            last_attestation_tx=rec[4],
+            last_attestation_id=rec[4],
+            last_transcript_hash=rec[5].hex() if isinstance(rec[5], (bytes, bytearray)) else str(rec[5]),
         )
 
     def list_agent_ids(self, max_id: int = 100) -> list[int]:

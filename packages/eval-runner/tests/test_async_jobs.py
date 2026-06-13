@@ -159,7 +159,7 @@ def test_async_publish_returns_202_then_poll_until_published(client, monkeypatch
 
     publish_response = client.post(
         "/eval/publish",
-        json={"run_id": run_id, "attestation_id": "att-1"},
+        json={"run_id": run_id, "attestation": {"inference_id": "att-1", "model": "gemma4"}},
         headers=_auth_headers(),
     )
     assert publish_response.status_code == 202

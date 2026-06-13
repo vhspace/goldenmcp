@@ -17,7 +17,8 @@ contract MCPRegistry {
         string mcpEndpoint;
         string agentUri;
         string ensName;
-        string lastAttestationTx;
+        string lastAttestationId;
+        bytes32 lastTranscriptHash;
         bool exists;
     }
 
@@ -28,7 +29,7 @@ contract MCPRegistry {
 
     event MCPRegistered(uint256 indexed agentId, string name, string endpoint);
     event ScoreUpdated(uint256 indexed agentId, string capability, uint16 compositeBps, bool failed);
-    event AttestationRecorded(uint256 indexed agentId, string txHash);
+    event AttestationRecorded(uint256 indexed agentId, string inferenceId, bytes32 transcriptHash);
 
     function register(
         string calldata name,
@@ -45,7 +46,8 @@ contract MCPRegistry {
             mcpEndpoint: mcpEndpoint,
             agentUri: agentUri,
             ensName: ensName,
-            lastAttestationTx: "",
+            lastAttestationId: "",
+            lastTranscriptHash: bytes32(0),
             exists: true
         });
         nameToAgentId[name] = agentId;
@@ -74,10 +76,15 @@ contract MCPRegistry {
         emit ScoreUpdated(agentId, capability, compositeBps, failed);
     }
 
-    function recordAttestation(uint256 agentId, string calldata txHash) external {
+    function recordAttestation(
+        uint256 agentId,
+        string calldata inferenceId,
+        bytes32 transcriptHash
+    ) external {
         require(records[agentId].exists, "unknown agent");
-        records[agentId].lastAttestationTx = txHash;
-        emit AttestationRecorded(agentId, txHash);
+        records[agentId].lastAttestationId = inferenceId;
+        records[agentId].lastTranscriptHash = transcriptHash;
+        emit AttestationRecorded(agentId, inferenceId, transcriptHash);
     }
 
     function getRecord(uint256 agentId) external view returns (MCPRecord memory) {

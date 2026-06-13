@@ -22,6 +22,8 @@ ENS names are the public identity for each scored MCP; text records point at Wal
 
 A Chainlink CRE workflow orchestrates the whole pipeline: it calls the eval-runner to score an MCP, submits the score manifest to Confidential AI (CAI) for attestation, publishes to Walrus, then writes the score + attestation onchain.
 
+The attestation **is** the completed TEE inference — there is no synthetic tx hash. The pipeline records the CAI `inference_id` and the `bytes32` **transcript hash** (the enclave's `response_digest`, falling back to `sha256(output)`) on-chain via `recordAttestation`, mirroring Chainlink's official undercollateralized-loan example.
+
 | What | Code |
 |------|------|
 | CRE pipeline (eval → CAI attest → Walrus → Arc) | [`workflows/eval-pipeline/src/pipeline.ts`](https://github.com/vhspace/goldenmcp/blob/main/workflows/eval-pipeline/src/pipeline.ts) |
@@ -56,9 +58,9 @@ flowchart TD
     Runner -->|score manifest| Pipeline
 
     Pipeline --> CAIcheck{has CAI key?}
-    CAIcheck -->|yes| CAI[Confidential AI: /v1/inference + poll]
+    CAIcheck -->|yes| CAI[Confidential AI TEE: /v1/inference + poll or callback]
     CAIcheck -->|no| SkipCAI[skip attestation]
-    CAI -->|attestation_id + tx_hash| Pipeline
+    CAI -->|inference_id + verdict + transcript_hash| Pipeline
     SkipCAI --> Pipeline
 
     Pipeline -->|POST /eval/publish| Walrus[(Walrus testnet: manifest + raw .eval log)]
@@ -89,7 +91,7 @@ sequenceDiagram
     Market->>Reg: list agents + getCapabilityScore
     Market->>Wal: download_json(manifest blob)
     Reg-->>Market: scores + ens_name + endpoint
-    Market-->>Agent: top MCP {ens_name, mcp_endpoint, composite, attestation_tx_hash}
+    Market-->>Agent: top MCP {ens_name, mcp_endpoint, composite, attestation_id, transcript_hash}
 ```
 
 ## Setup

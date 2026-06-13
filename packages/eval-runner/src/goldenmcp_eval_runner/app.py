@@ -26,7 +26,7 @@ from goldenmcp_inspect.pipeline import (
     publish_manifest_to_walrus,
     score_transcript_to_manifest,
 )
-from goldenmcp_inspect.schemas import EvalTranscript, ScoreManifest, TranscriptEvent
+from goldenmcp_inspect.schemas import CaiAttestation, EvalTranscript, ScoreManifest, TranscriptEvent
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -71,8 +71,7 @@ class EvalResponse(BaseModel):
 
 class PublishRequest(BaseModel):
     run_id: str
-    attestation_id: str | None = None
-    attestation_tx_hash: str | None = None
+    attestation: dict[str, Any] | None = None
     manifest: dict[str, Any] | None = None
     inspect_log_bytes_b64: str | None = None
 
@@ -121,22 +120,62 @@ def _manifest_from_dict(data: dict[str, Any]) -> ScoreManifest:
     return ScoreManifest(**data)
 
 
+def _to_bytes32(hex_digest: str | None) -> str | None:
+    """Normalize a 32-byte hex digest (with/without 0x) to a 0x bytes32 string."""
+    if not hex_digest:
+        return None
+    h = hex_digest[2:] if hex_digest[:2].lower() == "0x" else hex_digest
+    if len(h) != 64 or any(c not in "0123456789abcdefABCDEF" for c in h):
+        return None
+    return f"0x{h.lower()}"
+
+
+def _attestation_from_cai_status(status: dict[str, Any]) -> CaiAttestation | None:
+    """Map a raw CAI inference status (from the cre_callback) to a CaiAttestation.
+
+    The TEE inference is the attestation: `id` is the handle, `output` the verdict.
+    """
+    inference_id = status.get("id") or status.get("inference_id")
+    if not inference_id:
+        return None
+    usage = status.get("usage") or {}
+    resources = status.get("resources") or []
+    response_digest = resources[0].get("response_digest") if resources else None
+    transcript_hash = status.get("transcript_hash") or _to_bytes32(response_digest)
+    return CaiAttestation(
+        inference_id=str(inference_id),
+        model=str(status.get("model") or "gemma4"),
+        verdict=str(status.get("output") or status.get("verdict") or ""),
+        transcript_hash=transcript_hash,
+        completed_at=status.get("completed_at"),
+        prompt_tokens=usage.get("prompt_tokens"),
+        completion_tokens=usage.get("completion_tokens"),
+    )
+
+
 def _apply_attestation(
     manifest: ScoreManifest,
     *,
-    attestation_id: str | None,
-    attestation_tx_hash: str | None,
+    attestation: dict[str, Any] | None,
     cai_input: dict[str, Any] | None,
 ) -> None:
-    if attestation_id is not None:
-        manifest.attestation_id = attestation_id or None
-    elif cai_input and cai_input.get("attestation_id") is not None:
-        manifest.attestation_id = cai_input.get("attestation_id")
+    """Populate the manifest attestation from the workflow payload or a CAI callback.
 
-    if attestation_tx_hash is not None:
-        manifest.attestation_tx_hash = attestation_tx_hash or None
-    elif cai_input and cai_input.get("attestation_tx_hash") is not None:
-        manifest.attestation_tx_hash = cai_input.get("attestation_tx_hash")
+    The workflow-supplied `attestation` (already a CaiAttestation shape) wins; a raw
+    CAI callback `input` status is the async fallback.
+    """
+    record: CaiAttestation | None = None
+    if attestation:
+        try:
+            record = CaiAttestation(**attestation)
+        except Exception:  # noqa: BLE001 — tolerate a raw CAI status shape too
+            record = _attestation_from_cai_status(attestation)
+    elif cai_input:
+        record = _attestation_from_cai_status(cai_input)
+
+    if record is not None:
+        manifest.attestation = record
+        manifest.attestation_id = record.inference_id
 
 
 def _fail_job(run_id: str, error: str) -> None:
@@ -262,8 +301,7 @@ def _resolve_publish_job(request: PublishRequest) -> EvalJob | None:
 def _run_publish_job(
     run_id: str,
     *,
-    attestation_id: str | None,
-    attestation_tx_hash: str | None,
+    attestation: dict[str, Any] | None,
     job: EvalJob,
 ) -> None:
     eval_jobs.update(run_id, status=JobStatus.PUBLISHING)
@@ -276,8 +314,7 @@ def _run_publish_job(
 
     _apply_attestation(
         manifest,
-        attestation_id=attestation_id,
-        attestation_tx_hash=attestation_tx_hash,
+        attestation=attestation,
         cai_input=cai_input,
     )
 
@@ -491,8 +528,7 @@ def publish_eval(request: PublishRequest):
             request.run_id,
         ),
         kwargs={
-            "attestation_id": request.attestation_id,
-            "attestation_tx_hash": request.attestation_tx_hash,
+            "attestation": request.attestation,
             "job": job,
         },
         name=f"publish-{request.run_id}",
@@ -509,9 +545,17 @@ def publish_eval(request: PublishRequest):
     "/webhooks/cai",
     dependencies=[Depends(require_cai_webhook_secret)],
 )
-def cai_webhook(body: CaiWebhookBody):
-    """Receive Chainlink CAI cre_callback POST; store attestation by run_id for publish."""
-    run_id = cai_callbacks.put(body.input)
+def cai_webhook(body: CaiWebhookBody, run_id: str | None = Query(None)):
+    """Receive Chainlink CAI cre_callback POST; store attestation by run_id for publish.
+
+    CAI posts ``{"input": <inference status>}``. The status has no run_id, so the
+    workflow carries it in the callback URL query string; inject it here so the
+    callback store can key it for a later /eval/publish.
+    """
+    payload = dict(body.input)
+    if run_id and "run_id" not in payload:
+        payload["run_id"] = run_id
+    run_id = cai_callbacks.put(payload)
     if run_id:
         logger.info(
             "cai webhook stored run_id=%s callbacks_stored=%d input_keys=%s",

@@ -153,12 +153,23 @@ def test_webhooks_cai_rejects_invalid_secret(client):
 def test_webhooks_cai_accepts_valid_secret(client):
     response = client.post(
         "/webhooks/cai",
-        json={"input": {"attestation_id": "abc", "run_id": "run-1"}},
+        json={"input": {"id": "inf-1", "status": "completed", "run_id": "run-1"}},
         headers={"X-CAI-Webhook-Secret": "test-cai-secret"},
     )
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
     assert response.json()["run_id"] == "run-1"
+
+
+def test_webhooks_cai_injects_run_id_from_query(client):
+    """Real CAI status objects have no run_id; the workflow carries it in the URL query."""
+    response = client.post(
+        "/webhooks/cai?run_id=run-q",
+        json={"input": {"id": "inf-2", "status": "completed", "output": "PASS"}},
+        headers={"X-CAI-Webhook-Secret": "test-cai-secret"},
+    )
+    assert response.status_code == 200
+    assert response.json()["run_id"] == "run-q"
 
 
 def test_eval_inspect_query_params_backward_compat(client, monkeypatch):
@@ -247,7 +258,7 @@ def test_eval_inspect_stores_log_bytes_for_publish(client, monkeypatch):
 
     publish_response = client.post(
         "/eval/publish",
-        json={"run_id": run_id, "attestation_id": "att-1"},
+        json={"run_id": run_id, "attestation": {"inference_id": "att-1", "model": "gemma4"}},
         headers=_auth_headers(),
     )
     assert publish_response.status_code == 202
@@ -263,6 +274,7 @@ def test_eval_publish_merges_cai_webhook_attestation(client, monkeypatch):
 
     def fake_publish(manifest, **kwargs):
         captured["attestation_id"] = manifest.attestation_id
+        captured["attestation"] = manifest.attestation
         from goldenmcp_inspect.pipeline import WalrusUploadResult
 
         return WalrusUploadResult(
@@ -280,9 +292,23 @@ def test_eval_publish_merges_cai_webhook_attestation(client, monkeypatch):
     )
     run_id = score_response.json()["run_id"]
 
+    # Real CAI cre_callback: status object (id/output/usage), run_id carried in query string.
     client.post(
-        "/webhooks/cai",
-        json={"input": {"run_id": run_id, "attestation_id": "from-cai", "attestation_tx_hash": "0xabc"}},
+        f"/webhooks/cai?run_id={run_id}",
+        json={
+            "input": {
+                "id": "inf-from-cai",
+                "status": "completed",
+                "model": "gemma4",
+                "output": "PASS",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+                "resources": [
+                    {
+                        "response_digest": "0a0124911560a2236e432d30c3e2a90b0666f4c84b40bf10ba01960595c6ecea"
+                    }
+                ],
+            }
+        },
         headers={"X-CAI-Webhook-Secret": "test-cai-secret"},
     )
 
@@ -293,7 +319,13 @@ def test_eval_publish_merges_cai_webhook_attestation(client, monkeypatch):
     )
     assert publish_response.status_code == 202
     _poll_until(client, run_id, "published")
-    assert captured["attestation_id"] == "from-cai"
+    assert captured["attestation_id"] == "inf-from-cai"
+    assert captured["attestation"].inference_id == "inf-from-cai"
+    assert captured["attestation"].verdict == "PASS"
+    assert (
+        captured["attestation"].transcript_hash
+        == "0x0a0124911560a2236e432d30c3e2a90b0666f4c84b40bf10ba01960595c6ecea"
+    )
 
 
 @pytest.mark.skipif(
@@ -330,8 +362,7 @@ def test_eval_publish_integration(client):
         "/eval/publish",
         json={
             "run_id": run_id,
-            "attestation_id": "attest-test",
-            "attestation_tx_hash": "0xdead",
+            "attestation": {"inference_id": "attest-test", "model": "gemma4", "verdict": "PASS"},
         },
         headers=_auth_headers(),
     )
@@ -339,6 +370,7 @@ def test_eval_publish_integration(client):
     body = _poll_until(client, run_id, "published", timeout_s=120.0)
     assert body["walrus_manifest_blob_id"]
     assert body["walrus_eval_blob_id"]
+    assert body["manifest"]["attestation_id"] == "attest-test"
     assert body["manifest"]["attestation_id"] == "attest-test"
     assert body["manifest"]["attestation_tx_hash"] == "0xdead"
 

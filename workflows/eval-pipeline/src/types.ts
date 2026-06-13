@@ -34,8 +34,9 @@ export interface ScoreManifest {
   path_score: number;
   token_efficiency: number;
   composite: number;
+  /** CAI inference id, mirrored onchain as the attestation reference. */
   attestation_id?: string | null;
-  attestation_tx_hash?: string | null;
+  attestation?: CaiAttestation | null;
   walrus_manifest_blob_id?: string | null;
   walrus_blob_id?: string | null;
 }
@@ -45,8 +46,7 @@ export interface PipelineResult {
   mcp: string;
   capability: string;
   manifest: ScoreManifest;
-  attestationId?: string;
-  attestationTxHash?: string;
+  attestationInferenceId?: string;
   walrusManifestBlobId?: string;
   walrusEvalBlobId?: string;
   walrusIndexBlobId?: string;
@@ -56,7 +56,14 @@ export interface PipelineResult {
   skippedArc: boolean;
 }
 
+/** A completed Confidential AI (TEE) inference — this IS the attestation. */
 export interface CaiAttestation {
-  attestation_id?: string;
-  attestation_tx_hash?: string;
+  inference_id: string;
+  model: string;
+  verdict: string;
+  /** 0x-prefixed bytes32 response digest from the TEE; the onchain transcript hash. */
+  transcript_hash?: string;
+  completed_at?: string;
+  prompt_tokens?: number;
+  completion_tokens?: number;
 }
