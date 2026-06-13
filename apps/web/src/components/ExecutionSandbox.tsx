@@ -8,48 +8,10 @@ import {
   parseDemoPrompt,
   type ParsedIntent,
 } from "@/lib/intent";
-
-interface LookupResponse {
-  status: "ok" | "payment_required" | "error";
-  message: string;
-  detail?: Record<string, unknown>;
-}
-
-async function startWorkflow(intent: ParsedIntent): Promise<LookupResponse> {
-  const res = await fetch("/api/marketplace/lookup", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      capability: intent.marketplaceCapability,
-      min_score: intent.minReliabilityScore,
-      intent,
-    }),
-  });
-
-  const body = await res.json().catch(() => ({}));
-
-  if (res.status === 402) {
-    return {
-      status: "payment_required",
-      message: "Marketplace reachable — x402 USDC payment required to complete lookup",
-      detail: body,
-    };
-  }
-
-  if (!res.ok) {
-    return {
-      status: "error",
-      message: body.error ?? body.detail ?? `Marketplace lookup failed: HTTP ${res.status}`,
-      detail: typeof body === "object" ? body : undefined,
-    };
-  }
-
-  return {
-    status: "ok",
-    message: "Workflow started — best MCP matched",
-    detail: body,
-  };
-}
+import type { PipelineRunState } from "@/lib/pipeline";
+import { createInitialPipelineState } from "@/lib/pipeline";
+import { runDemoPipeline } from "@/lib/run-demo-pipeline";
+import { FlightTracker } from "@/components/FlightTracker";
 
 function IntentSummary({ intent }: { intent: ParsedIntent }) {
   return (
@@ -91,12 +53,12 @@ export function ExecutionSandbox() {
   const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null);
   const [intent, setIntent] = useState<ParsedIntent | null>(null);
   const [parseError, setParseError] = useState("");
-  const [workflowStatus, setWorkflowStatus] = useState<LookupResponse | null>(null);
+  const [pipeline, setPipeline] = useState<PipelineRunState | null>(null);
   const [loading, setLoading] = useState(false);
 
   function selectPrompt(text: string) {
     setParseError("");
-    setWorkflowStatus(null);
+    setPipeline(null);
     setSelectedPrompt(text);
     try {
       setIntent(parseDemoPrompt(text));
@@ -109,17 +71,25 @@ export function ExecutionSandbox() {
   async function handleStartWorkflow() {
     if (!intent) return;
     setLoading(true);
-    setWorkflowStatus(null);
+    setPipeline(createInitialPipelineState());
     try {
-      const result = await startWorkflow(intent);
-      setWorkflowStatus(result);
+      await runDemoPipeline(intent, setPipeline);
     } catch (err) {
-      setWorkflowStatus({
-        status: "error",
-        message:
-          err instanceof Error
-            ? err.message
-            : "Marketplace/eval-runner unreachable — start goldenmcp_marketplace on :8091",
+      setPipeline((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          failedStep: "execution_engine",
+          steps: prev.steps.map((s) =>
+            s.status === "active"
+              ? {
+                  ...s,
+                  status: "error" as const,
+                  error: err instanceof Error ? err.message : String(err),
+                }
+              : s,
+          ),
+        };
       });
     } finally {
       setLoading(false);
@@ -131,8 +101,8 @@ export function ExecutionSandbox() {
       <header style={{ marginBottom: "1.25rem" }}>
         <h2 style={{ margin: 0, fontSize: "1.35rem" }}>Execution Sandbox</h2>
         <p style={{ color: "#aaa", marginTop: "0.35rem", maxWidth: "48rem" }}>
-          Click a pre-baked demo prompt — orchestration parses intent into plain English, then starts
-          marketplace lookup.
+          Click a pre-baked demo prompt — orchestration parses intent into plain English, then runs the
+          live pipeline with step-by-step flight tracking.
         </p>
       </header>
 
@@ -192,43 +162,12 @@ export function ExecutionSandbox() {
               cursor: loading ? "wait" : "pointer",
             }}
           >
-            {loading ? "Starting workflow…" : "Start Workflow"}
+            {loading ? "Running pipeline…" : "Start Workflow"}
           </button>
         </>
       )}
 
-      {workflowStatus && (
-        <div
-          style={{
-            marginTop: "1rem",
-            padding: "1rem",
-            borderRadius: "8px",
-            border: `1px solid ${
-              workflowStatus.status === "error"
-                ? "#f87171"
-                : workflowStatus.status === "payment_required"
-                  ? "#fbbf24"
-                  : "#34d399"
-            }`,
-            background: "#111",
-            fontSize: "0.9rem",
-          }}
-        >
-          <strong>{workflowStatus.message}</strong>
-          {workflowStatus.detail && (
-            <pre
-              style={{
-                marginTop: "0.75rem",
-                fontSize: "0.75rem",
-                overflow: "auto",
-                color: "#aaa",
-              }}
-            >
-              {JSON.stringify(workflowStatus.detail, null, 2)}
-            </pre>
-          )}
-        </div>
-      )}
+      <FlightTracker pipeline={pipeline} />
     </section>
   );
 }
