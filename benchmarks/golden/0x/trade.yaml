@@ -1,0 +1,12 @@
+expected_path:
+  - get_quote
+  - submit_trade
+allowed_tools:
+  - get_quote
+  - submit_trade
+baseline_tokens: 12000
+expected_data:
+  trade.tx_hash:
+    contains: "0x"
+policy:
+  forbidden_actions: []

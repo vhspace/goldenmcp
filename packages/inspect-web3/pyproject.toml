@@ -1,0 +1,28 @@
+[project]
+name = "goldenmcp-inspect-web3"
+version = "0.1.0"
+description = "Inspect eval tasks and scorers for web3 MCPs"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "inspect-ai>=0.3.0",
+    "fsspec>=2024.0",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "goldenmcp-walrus",
+]
+
+[project.entry-points.inspect_ai]
+goldenmcp = "goldenmcp_inspect.tasks"
+
+[project.entry-points."fsspec.specs"]
+walrus = "goldenmcp_walrus:WalrusFileSystem"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/goldenmcp_inspect"]
+
+[tool.uv.sources]
+goldenmcp-walrus = { workspace = true }

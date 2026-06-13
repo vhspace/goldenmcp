@@ -1,0 +1,55 @@
+name = "Task"
+description = "Implementation task for GoldenMCP"
+title = "Task"
+labels: ["P0"]
+body:
+  - type: dropdown
+    id: epic
+    attributes:
+      label: Epic
+      options:
+        - epic/infra
+        - epic/eval
+        - epic/walrus
+        - epic/web
+        - epic/identity
+        - epic/chainlink
+        - epic/marketplace
+    validations:
+      required: true
+  - type: dropdown
+    id: estimate
+    attributes:
+      label: Estimate
+      options:
+        - estimate:1h
+        - estimate:2h
+        - estimate:3h
+        - estimate:4h
+    validations:
+      required: true
+  - type: input
+    id: assignee_skill
+    attributes:
+      label: Assignee skill
+      placeholder: Python, TypeScript, Solidity, DevOps
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance_tests
+    attributes:
+      label: Acceptance tests
+      description: Commands and criteria that must pass before close
+    validations:
+      required: true
+  - type: textarea
+    id: blocked_by
+    attributes:
+      label: Blocked by
+      description: Issue numbers or external dependencies
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+    validations:
+      required: true

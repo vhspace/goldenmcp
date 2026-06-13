@@ -1,0 +1,13 @@
+---
+description: Commit working changes frequently; do not let large uncommitted diffs accumulate
+alwaysApply: true
+---
+
+# Commit Often
+
+- Commit after each logical unit of work lands (feature slice, fix, test pass, docs update).
+- Do not accumulate large uncommitted diffs across sessions — push incremental progress instead.
+- Before ending a session or switching tasks, commit anything that builds and passes existing tests.
+- Ask the user before committing only when they have not requested commits in the current task; when they say "commit", do it without further confirmation.
+- Never commit secrets (`.env`, keys, credentials). `.env.example` is fine.
+- Write commit messages that explain why, not just what changed.

@@ -1,0 +1,11 @@
+---
+description: No mocks, simulators, or silent fallbacks
+alwaysApply: true
+---
+
+# Real Code Only
+
+- No mock data, fake endpoints, stubbed attestation, recorded-response fixtures, or UI simulators.
+- No silent fallbacks — if Walrus, Arc, ENS, Chainlink CAI, or a target MCP is unavailable, fail loudly with verbose errors and logging.
+- Golden datasets are for scoring expected outputs, not substituted at runtime.
+- Use `uv` / `uvx` for Python; never `pip install`.
