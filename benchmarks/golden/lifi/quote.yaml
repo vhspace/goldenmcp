@@ -1,9 +1,12 @@
+# Tool names confirmed against the live LI.FI MCP (mcp.li.quest/mcp): an agent
+# resolves the token then quotes. `get-token` (singular, one lookup) and
+# `get-tokens` (plural, list) are both real; both are allowed for the read path.
 expected_path:
-  - get-chains
-  - get-tokens
+  - get-token
   - get-quote
 allowed_tools:
   - get-chains
+  - get-token
   - get-tokens
   - get-quote
 baseline_tokens: 8000
