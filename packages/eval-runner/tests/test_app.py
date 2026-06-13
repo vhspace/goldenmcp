@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import base64
 import importlib
+import time
 
 import pytest
 from fastapi.testclient import TestClient
 
 from goldenmcp_eval_runner.app import app
-from goldenmcp_eval_runner.pending_runs import cai_callbacks, pending_runs
+from goldenmcp_eval_runner.jobs import eval_jobs
+from goldenmcp_eval_runner.pending_runs import cai_callbacks
 from goldenmcp_eval_runner.settings import get_settings
 
 
@@ -19,10 +21,10 @@ def _app_module():
 
 @pytest.fixture(autouse=True)
 def clear_stores():
-    pending_runs._runs.clear()
+    eval_jobs._jobs.clear()
     cai_callbacks._by_run_id.clear()
     yield
-    pending_runs._runs.clear()
+    eval_jobs._jobs.clear()
     cai_callbacks._by_run_id.clear()
 
 
@@ -50,6 +52,18 @@ def _sample_transcript_payload() -> dict:
         "final_output": {"amount": 1, "token": "USDC"},
         "total_tokens": 2000,
     }
+
+
+def _poll_until(client, run_id: str, target_status: str, timeout_s: float = 5.0) -> dict:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        response = client.get(f"/eval/runs/{run_id}", headers=_auth_headers())
+        if response.status_code == 200 and response.json().get("status") == target_status:
+            return response.json()
+        if response.status_code == 200 and response.json().get("status") == "failed":
+            return response.json()
+        time.sleep(0.05)
+    raise AssertionError(f"run {run_id} did not reach {target_status} within {timeout_s}s")
 
 
 def test_health_no_auth(client):
@@ -178,7 +192,9 @@ def test_eval_inspect_query_params_backward_compat(client, monkeypatch):
         "/eval/inspect?mcp=lifi&capability=quote&model=openai/gpt-4o-mini",
         headers=_auth_headers(),
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
+    run_id = response.json()["run_id"]
+    _poll_until(client, run_id, "scored")
     assert captured["task"] == "goldenmcp/lifi_quote"
 
 
@@ -225,15 +241,17 @@ def test_eval_inspect_stores_log_bytes_for_publish(client, monkeypatch):
         json={"mcp": "lifi", "capability": "quote"},
         headers=_auth_headers(),
     )
-    assert inspect_response.status_code == 200
+    assert inspect_response.status_code == 202
     run_id = inspect_response.json()["run_id"]
+    _poll_until(client, run_id, "scored")
 
     publish_response = client.post(
         "/eval/publish",
         json={"run_id": run_id, "attestation_id": "att-1"},
         headers=_auth_headers(),
     )
-    assert publish_response.status_code == 200
+    assert publish_response.status_code == 202
+    _poll_until(client, run_id, "published")
     assert captured["inspect_log_bytes"] == fake_log
     assert captured["inspect_log_path"] == "/tmp/goldenmcp_lifi_quote.eval"
 
@@ -273,7 +291,8 @@ def test_eval_publish_merges_cai_webhook_attestation(client, monkeypatch):
         json={"run_id": run_id},
         headers=_auth_headers(),
     )
-    assert publish_response.status_code == 200
+    assert publish_response.status_code == 202
+    _poll_until(client, run_id, "published")
     assert captured["attestation_id"] == "from-cai"
 
 
@@ -287,10 +306,10 @@ def test_eval_inspect_returns_manifest_without_walrus(client):
         json={"mcp": "lifi", "capability": "quote", "model": "openai/gpt-4o-mini"},
         headers=_auth_headers(),
     )
-    assert response.status_code == 200
-    body = response.json()
-    assert body["run_id"]
-    manifest = body["manifest"]
+    assert response.status_code == 202
+    run_id = response.json()["run_id"]
+    final = _poll_until(client, run_id, "scored", timeout_s=300.0)
+    manifest = final["manifest"]
     assert manifest.get("walrus_manifest_blob_id") is None
     assert manifest.get("walrus_blob_id") is None
 
@@ -316,8 +335,8 @@ def test_eval_publish_integration(client):
         },
         headers=_auth_headers(),
     )
-    assert publish_response.status_code == 200
-    body = publish_response.json()
+    assert publish_response.status_code == 202
+    body = _poll_until(client, run_id, "published", timeout_s=120.0)
     assert body["walrus_manifest_blob_id"]
     assert body["walrus_eval_blob_id"]
     assert body["manifest"]["attestation_id"] == "attest-test"
@@ -348,7 +367,7 @@ def test_eval_publish_legacy_manifest_with_log_bytes(client, monkeypatch):
         headers=_auth_headers(),
     )
     run_id = score_response.json()["run_id"]
-    pending_runs.pop(run_id)
+    eval_jobs._jobs.pop(run_id, None)
 
     publish_response = client.post(
         "/eval/publish",
@@ -359,5 +378,6 @@ def test_eval_publish_legacy_manifest_with_log_bytes(client, monkeypatch):
         },
         headers=_auth_headers(),
     )
-    assert publish_response.status_code == 200
+    assert publish_response.status_code == 202
+    _poll_until(client, run_id, "published")
     assert captured["inspect_log_bytes"] == raw
