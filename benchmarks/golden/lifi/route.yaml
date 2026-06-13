@@ -1,0 +1,15 @@
+expected_path:
+  - get_chains
+  - get_routes
+  - get_best_route
+allowed_tools:
+  - get_chains
+  - get_routes
+  - get_best_route
+baseline_tokens: 10000
+expected_data:
+  route.steps:
+    min: 1
+policy:
+  forbidden_actions:
+    - execute_swap

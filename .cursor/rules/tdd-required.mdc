@@ -1,0 +1,10 @@
+---
+description: Test-driven development required
+alwaysApply: true
+---
+
+# TDD Required
+
+- Red → green → refactor for every change: write a failing test first.
+- Integration tests preferred against real services; no `unittest.mock`, `msw`, or `nock` in production code paths.
+- Each feature includes acceptance tests that must pass before merge.

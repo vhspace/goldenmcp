@@ -1,0 +1,10 @@
+---
+description: Archive all plan files for judge review
+alwaysApply: true
+---
+
+# Keep Plan Files
+
+- Every plan produced during development must be copied to `docs/plans/` with a date prefix (e.g. `2026-06-12-goldenmcp-eval-marketplace.md`).
+- Never delete or overwrite plan files; append revisions as new dated files.
+- README must link to `docs/plans/` for judge review.

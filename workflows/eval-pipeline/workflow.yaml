@@ -1,0 +1,9 @@
+workflow-name: goldenmcp-eval-pipeline
+workflow-path: ./src/workflow.ts
+
+staging-settings:
+  schedule: "0 */6 * * *"
+  evalRunnerUrl: "http://localhost:8090"
+  walrusAggregatorUrl: "https://aggregator.walrus-testnet.walrus.space"
+  arcRegistryAddress: ""
+  chainlinkCaiUrl: ""

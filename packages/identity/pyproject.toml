@@ -1,0 +1,19 @@
+[project]
+name = "goldenmcp-identity"
+version = "0.1.0"
+description = "ENS and ERC-8004 MCP registry SDK"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "web3>=7.0",
+    "eth-abi>=5.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/goldenmcp_identity"]

@@ -1,0 +1,12 @@
+expected_path:
+  - get_quote
+  - execute_swap
+allowed_tools:
+  - get_quote
+  - execute_swap
+baseline_tokens: 15000
+expected_data:
+  swap.txHash:
+    contains: "0x"
+policy:
+  forbidden_actions: []

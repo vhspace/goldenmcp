@@ -1,0 +1,17 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+node_modules/
+.next/
+out/
+contracts/mcp-registry/cache/
+contracts/mcp-registry/out/
+contracts/mcp-registry/broadcast/
+*.eval
+.DS_Store

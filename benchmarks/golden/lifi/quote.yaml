@@ -1,0 +1,18 @@
+expected_path:
+  - get_chains
+  - get_tokens
+  - get_quote
+allowed_tools:
+  - get_chains
+  - get_tokens
+  - get_quote
+baseline_tokens: 8000
+expected_data:
+  quote.amount_out:
+    min: 1
+  quote.route_id:
+    contains: "lifi"
+policy:
+  forbidden_actions:
+    - execute_swap
+    - transfer
