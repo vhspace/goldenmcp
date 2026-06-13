@@ -1,0 +1,12 @@
+---
+description: Run code you wrote before claiming it works
+alwaysApply: true
+---
+
+# Run Before Claiming Done
+
+- Execute the code path you changed — do not stop at "here's the command" unless the user must run it interactively (OTP, browser login, passkey).
+- Before saying something works, passes, or is ready: run the relevant tests, scripts, CLI, or service and read the output.
+- For user-facing flows (upload hooks, HTTP services, `inspect view`, Walrus/S3 paths): start the process and verify with a real request or API call, not only unit tests.
+- If verification fails, fix or report the failure — do not claim success from code review alone.
+- When suggesting follow-up commands to the user, run them yourself first when the environment allows.
