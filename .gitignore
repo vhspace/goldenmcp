@@ -16,3 +16,14 @@ contracts/mcp-registry/broadcast/
 *.eval
 .DS_Store
 .worktrees/
+# Terraform eval-runner (local state; may contain droplet metadata)
+infra/terraform/eval-runner/.terraform/
+infra/terraform/eval-runner/*.tfstate
+infra/terraform/eval-runner/*.tfstate.*
+infra/terraform/eval-runner/terraform.tfvars
+infra/terraform/eval-runner/secrets.auto.tfvars
+infra/terraform/eval-runner/crash.log
+infra/terraform/eval-runner/override.tf
+infra/terraform/eval-runner/override.tf.json
+*_override.tf
+*_override.tf.json
