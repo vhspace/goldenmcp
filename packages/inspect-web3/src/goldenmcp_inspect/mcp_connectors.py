@@ -7,7 +7,7 @@ import os
 import urllib.parse
 from dataclasses import dataclass
 
-from inspect_ai.tool import mcp_server_http, mcp_server_stdio
+from inspect_ai.tool import mcp_server_http, mcp_server_sse, mcp_server_stdio
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,13 @@ HTTP_VENDORS = {
     "uniswap": "UNISWAP_MCP_URL",
     "1inch": "ONEINCH_MCP_URL",
 }
+
+# Vendors whose endpoint uses the MCP SSE transport rather than Streamable-HTTP.
+# 1inch's official Business MCP (https://api.1inch.com/mcp/protocol) is stateless
+# Streamable-HTTP, so it is NOT here — it goes through the default HTTP path. (An
+# earlier SSE endpoint, api.1inch.dev/mcp/sse, was unusable: no load-balancer
+# session affinity, so the message-POST 400s.)
+SSE_VENDORS: set[str] = set()
 
 
 @dataclass(frozen=True)
@@ -203,5 +210,14 @@ def build_mcp_server(vendor: str, *, require_wallet: bool = False):
         )
 
     cfg = http_mcp_config(vendor)
+    # 1inch's official Business MCP is the stateless Streamable-HTTP endpoint
+    # https://api.1inch.com/mcp/protocol (per business.1inch.com AI-integration
+    # docs): POST initialize -> 200, session via the Mcp-Session-Id header. NOTE:
+    # the api.1inch.dev/mcp/sse endpoint is a dead end — its SSE message-POST leg
+    # 400s ("No active SSE session") because that server has no load-balancer
+    # session affinity. Use the .com Streamable-HTTP host. SSE_VENDORS stays empty.
+    if vendor in SSE_VENDORS:
+        logger.info("%s sse connector url=%s", vendor, cfg.url)
+        return mcp_server_sse(url=cfg.url, name=cfg.name, headers=cfg.headers)
     logger.info("%s http connector url=%s", vendor, cfg.url)
     return mcp_server_http(url=cfg.url, name=cfg.name, headers=cfg.headers)
