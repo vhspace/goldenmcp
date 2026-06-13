@@ -1,9 +1,33 @@
 workflow-name: goldenmcp-eval-pipeline
 workflow-path: ./src/workflow.ts
+secrets-path: ./secrets.yaml
 
+# Production-like staging (CAI URL set — requires CHAINLINK_CAI_API_KEY secret).
 staging-settings:
   schedule: "0 */6 * * *"
   evalRunnerUrl: "http://localhost:8090"
+  evalRunnerApiKey: ""
+  chainlinkCaiUrl: "https://confidential-ai-dev-preview.cldev.cloud"
   walrusAggregatorUrl: "https://aggregator.walrus-testnet.walrus.space"
   arcRegistryAddress: ""
+  arcChainSelector: "arc-testnet"
+  defaultAgentId: 1
+  useScoreOnly: false
+  caiPollMaxAttempts: 60
+  caiPollIntervalMs: 2000
+
+# Local simulate defaults: skip CAI unless you set URL + key, fast score-only path for lifi/quote.
+staging-simulate:
+  schedule: "0 */6 * * *"
+  evalRunnerUrl: "http://localhost:8090"
+  evalRunnerApiKey: ""
   chainlinkCaiUrl: ""
+  walrusAggregatorUrl: "https://aggregator.walrus-testnet.walrus.space"
+  arcRegistryAddress: ""
+  arcChainSelector: "arc-testnet"
+  defaultAgentId: 1
+  useScoreOnly: true
+  benchmarkAllowlist:
+    - lifi/quote
+  caiPollMaxAttempts: 60
+  caiPollIntervalMs: 2000
