@@ -27,10 +27,22 @@ DEFAULT_MCPS = [
         "ens_name": "odos-quote.goldenmcp.eth",
     },
     {
-        "name": "uniswap",
-        "mcp_endpoint": os.environ.get("UNISWAP_MCP_URL", ""),
-        "agent_uri": "walrus://manifests/uniswap",
-        "ens_name": "uniswap-quote.goldenmcp.eth",
+        "name": "1inch",
+        "mcp_endpoint": os.environ.get("ONEINCH_MCP_URL", ""),
+        "agent_uri": "walrus://manifests/1inch",
+        "ens_name": "1inch-quote.goldenmcp.eth",
+    },
+    {
+        "name": "kyberswap",
+        "mcp_endpoint": "stdio:node/kyberswap-mcp",
+        "agent_uri": "walrus://manifests/kyberswap",
+        "ens_name": "kyberswap-quote.goldenmcp.eth",
+    },
+    {
+        "name": "jupiter",
+        "mcp_endpoint": "stdio:npx/jupiter-mcp-server",
+        "agent_uri": "walrus://manifests/jupiter",
+        "ens_name": "jupiter-quote.goldenmcp.eth",
     },
 ]
 
@@ -43,7 +55,7 @@ def main() -> int:
     url_missing = [m["name"] for m in DEFAULT_MCPS if not m["mcp_endpoint"]]
     if url_missing:
         logger.error(
-            "Missing MCP endpoints for: %s — set LIFI_MCP_URL, UNISWAP_MCP_URL (odos is stdio)",
+            "Missing MCP endpoints for: %s — set LIFI_MCP_URL, ONEINCH_MCP_URL (odos/kyberswap/jupiter are stdio)",
             url_missing,
         )
         return 1

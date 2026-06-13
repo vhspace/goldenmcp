@@ -6,7 +6,7 @@
 #   ./scripts/setup_eval_env.sh --check   # verify prerequisites only
 #
 # Chain strategy (see packages/inspect-web3/src/goldenmcp_inspect/eval_chains.py):
-#   - Quote evals: Base mainnet (8453) for LI.FI, Odos, Uniswap
+#   - Quote evals: Base mainnet (8453) for LI.FI, Odos, 1inch, KyberSwap
 #   - odos_swap:   Fraxtal (252) — Odos MCP default execution chain
 #   - ENS identity stays on Sepolia (separate from swap evals)
 #
@@ -93,13 +93,8 @@ ensure_default_urls() {
   if [[ -z "$(env_get LIFI_MCP_URL)" ]]; then
     env_set LIFI_MCP_URL "https://mcp.li.quest/mcp"
   fi
-  if [[ -z "$(env_get LIFI_API_KEY)" ]]; then
-    env_set LIFI_API_KEY "test-api-key"
-    log "Set LIFI_API_KEY=test-api-key (public dev key; replace with li.fi key for higher limits)"
-  fi
-  if [[ -z "$(env_get UNISWAP_MCP_URL)" ]]; then
-    env_set UNISWAP_MCP_URL "https://uniswap.mcp.junct.dev/mcp"
-  fi
+  # LIFI_API_KEY intentionally left empty: LI.FI works keyless (200 req/2h), and a
+  # bogus placeholder value 401s (code 1010). Set a real li.fi key for higher limits.
   if [[ -z "$(env_get EVAL_CHAIN_QUOTE)" ]]; then
     env_set EVAL_CHAIN_QUOTE "base"
   fi
@@ -145,7 +140,7 @@ generate_eval_wallet() {
 
   log "Created eval wallet address: ${address}"
   log "Fund this address before swap evals:"
-  log "  Base (8453)   — LI.FI / Odos quote / Uniswap: https://docs.base.org/base-chain/tools/network-faucets"
+  log "  Base (8453)   — LI.FI / Odos quote / 1inch / KyberSwap: https://docs.base.org/base-chain/tools/network-faucets"
   log "  Fraxtal (252) — odos_swap only: https://docs.frax.com/fraxtal/welcome/faucet"
 }
 

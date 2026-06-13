@@ -34,7 +34,6 @@ KYBERSWAP_STDIO_COMMAND = "bash"
 
 HTTP_VENDORS = {
     "lifi": "LIFI_MCP_URL",
-    "uniswap": "UNISWAP_MCP_URL",
     "1inch": "ONEINCH_MCP_URL",
 }
 

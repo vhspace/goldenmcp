@@ -9,8 +9,6 @@ from goldenmcp_inspect.tasks import (
     odos_swap,
     oneinch_quote,
     oneinch_swap,
-    uniswap_quote,
-    uniswap_swap,
 )
 
 __all__ = [
@@ -18,8 +16,6 @@ __all__ = [
     "lifi_route",
     "odos_quote",
     "odos_swap",
-    "uniswap_quote",
-    "uniswap_swap",
     "oneinch_quote",
     "oneinch_swap",
     "kyberswap_quote",
