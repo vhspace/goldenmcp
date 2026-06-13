@@ -1,0 +1,48 @@
+---
+description: Do feature work in a git worktree on a branch; keep the main checkout for integration only
+alwaysApply: true
+---
+
+# Git Worktree Workflow
+
+## Main checkout is integration-only
+
+The primary repo checkout (usually on `main`) is for:
+
+- Pulling merged work (`git pull origin main`)
+- Final integration and smoke tests before demo/release
+- Browsing the repo without changing files
+
+Do **not** implement features, run long eval jobs, or leave WIP edits on the main checkout.
+
+## Feature work uses a worktree + branch
+
+Before any task that edits code, docs, config, or tests:
+
+1. **Check isolation** — if `git rev-parse --git-dir` and `git rev-parse --git-common-dir` differ, you are already in a linked worktree; work there.
+2. **Create a worktree** on a new branch under `.worktrees/`:
+
+   ```bash
+   git fetch origin main
+   git worktree add .worktrees/feat/short-name -b feat/short-name origin/main
+   cd .worktrees/feat/short-name
+   ```
+
+3. **Commit, test, and push** only from that worktree; open a PR per `commit-often.mdc`.
+4. **After merge**, pull in the main checkout, run integration checks, then remove the worktree:
+
+   ```bash
+   git worktree remove .worktrees/feat/short-name
+   git branch -d feat/short-name   # after remote branch is gone
+   ```
+
+## Conventions
+
+- Worktree paths: `.worktrees/<branch-slug>/` (gitignored; never commit worktree contents).
+- One worktree per active branch; do not nest worktrees.
+- Branch from `origin/main` unless the user specifies another base.
+
+## Exceptions
+
+- User explicitly requests a hotfix or edit directly on `main`.
+- Read-only inspection (no writes) may use the main checkout.

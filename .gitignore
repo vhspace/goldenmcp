@@ -15,3 +15,4 @@ contracts/mcp-registry/out/
 contracts/mcp-registry/broadcast/
 *.eval
 .DS_Store
+.worktrees/

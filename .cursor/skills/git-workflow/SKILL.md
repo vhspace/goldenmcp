@@ -7,6 +7,20 @@ description: >-
 
 # Git workflow: commit often, merge via PR
 
+See also `.cursor/rules/git-worktree-workflow.mdc` — implement in a worktree; keep the main checkout for integration only.
+
+## Worktree first
+
+Before editing files on a new task:
+
+```bash
+git fetch origin main
+git worktree add .worktrees/feat/short-name -b feat/short-name origin/main
+cd .worktrees/feat/short-name
+```
+
+If already inside a linked worktree, skip creation and work on the current branch.
+
 ## Commit
 
 - Commit after each logical unit of work (see `.cursor/rules/commit-often.mdc`).
