@@ -6,9 +6,12 @@ import urllib.parse
 
 import pytest
 
+from goldenmcp_inspect import mcp_connectors
 from goldenmcp_inspect.mcp_connectors import (
     ODOS_STDIO_ARGS,
     ODOS_STDIO_COMMAND,
+    SSE_VENDORS,
+    build_mcp_server,
     http_mcp_config,
     jupiter_stdio_config,
     jupiter_stdio_env,
@@ -99,6 +102,37 @@ def test_oneinch_http_includes_bearer_header(monkeypatch):
     assert cfg.url == "https://mcp.1inch.dev/mcp"
     assert cfg.headers is not None
     assert cfg.headers["Authorization"] == "Bearer test-key"
+
+
+def test_oneinch_is_sse_vendor():
+    # 1inch's official endpoint only speaks the MCP SSE transport (GET /mcp/sse);
+    # the Streamable-HTTP path /mcp 404s even with a valid Bearer key.
+    assert "1inch" in SSE_VENDORS
+
+
+def test_oneinch_build_routes_via_sse_with_bearer(monkeypatch):
+    monkeypatch.setenv("ONEINCH_MCP_URL", "https://api.1inch.dev/mcp/sse")
+    monkeypatch.setenv("ONEINCH_API_KEY", "test-key")
+
+    calls: dict[str, dict] = {}
+
+    def fake_sse(**kwargs):
+        calls["sse"] = kwargs
+        return object()
+
+    def fake_http(**kwargs):  # pragma: no cover - asserted not called
+        calls["http"] = kwargs
+        return object()
+
+    monkeypatch.setattr(mcp_connectors, "mcp_server_sse", fake_sse)
+    monkeypatch.setattr(mcp_connectors, "mcp_server_http", fake_http)
+
+    build_mcp_server("1inch")
+
+    assert "sse" in calls
+    assert "http" not in calls
+    assert calls["sse"]["url"] == "https://api.1inch.dev/mcp/sse"
+    assert calls["sse"]["headers"]["Authorization"] == "Bearer test-key"
 
 
 def test_jupiter_stdio_uses_npx_package():

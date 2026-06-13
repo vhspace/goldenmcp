@@ -7,7 +7,7 @@ import os
 import urllib.parse
 from dataclasses import dataclass
 
-from inspect_ai.tool import mcp_server_http, mcp_server_stdio
+from inspect_ai.tool import mcp_server_http, mcp_server_sse, mcp_server_stdio
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,9 @@ HTTP_VENDORS = {
     "uniswap": "UNISWAP_MCP_URL",
     "1inch": "ONEINCH_MCP_URL",
 }
+
+# Vendors whose endpoint uses the MCP SSE transport rather than Streamable-HTTP.
+SSE_VENDORS = {"1inch"}
 
 
 @dataclass(frozen=True)
@@ -203,5 +206,30 @@ def build_mcp_server(vendor: str, *, require_wallet: bool = False):
         )
 
     cfg = http_mcp_config(vendor)
+    # 1inch's official endpoint speaks the MCP SSE transport (GET .../mcp/sse
+    # returns the event-stream handshake), not Streamable-HTTP — the Streamable
+    # path /mcp 404s (`Cannot POST /mcp`) even WITH a valid Bearer key.
+    #
+    # KNOWN BLOCKER (server-side, not fixable client-side): the SSE handshake's
+    # message-POST leg always fails with HTTP 400
+    #   {"error":"No active SSE session. Connect to /mcp/sse first."}
+    # The GET /mcp/sse stream returns `event: endpoint` ->
+    # `/mcp/messages?sessionId=<uuid>` and authenticates (200), but the
+    # subsequent POST /mcp/messages?sessionId=... is rejected as if no session
+    # exists. Verified with a standalone mcp.client.sse repro (independent of
+    # Inspect): auth header IS sent on the POST (httpx client carries it on both
+    # legs), the relative endpoint resolves correctly to the same origin, the
+    # __cf_bm cookie is replayed, and Accept-header variants make no difference.
+    # A POST with a bogus sessionId (no GET at all) returns the IDENTICAL error,
+    # and 15 rapid POSTs against one live session yield 0 successes across 15
+    # distinct Cloudflare edges. The only client-visible cookie is __cf_bm (bot
+    # management, not affinity), so 1inch's server holds SSE sessions in-memory
+    # per backend instance behind a load balancer with no session affinity —
+    # the message POST cannot be pinned to the instance owning the stream.
+    # This is a 1inch infrastructure defect; the wiring below is correct and
+    # will work once 1inch fixes affinity (or ships a Streamable-HTTP endpoint).
+    if vendor in SSE_VENDORS:
+        logger.info("%s sse connector url=%s", vendor, cfg.url)
+        return mcp_server_sse(url=cfg.url, name=cfg.name, headers=cfg.headers)
     logger.info("%s http connector url=%s", vendor, cfg.url)
     return mcp_server_http(url=cfg.url, name=cfg.name, headers=cfg.headers)
