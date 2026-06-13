@@ -9,10 +9,12 @@ allowed_tools:
   - get-token
   - get-tokens
   - get-quote
-# Calibrated from live runs: LI.FI's 25-tool schema + prompt-cache reads put a
-# real quote around 20-40k total tokens. (Other MCPs' baselines are still
-# placeholders pending their own live calibration.)
-baseline_tokens: 40000
+# Token budget (caching disabled). LI.FI's ~20k-token tool schema is re-sent as
+# input on every tool round, so a clean 1-round quote ~= 21-22k tokens and each
+# extra round adds ~17k. Budget = ~2 efficient rounds, so a 1-round run scores
+# ~0.5 and wasteful multi-round runs are penalized. (Other MCPs' baselines are
+# still placeholders pending their own live calibration.)
+baseline_tokens: 45000
 # Confirmed against the live LI.FI get-quote response: the output amount is a
 # (stringified) integer at estimate.toAmount.
 expected_data:

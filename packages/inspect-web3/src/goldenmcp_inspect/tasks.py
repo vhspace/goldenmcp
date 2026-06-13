@@ -7,6 +7,7 @@ import logging
 
 from inspect_ai import Task, task
 from inspect_ai.dataset import Sample
+from inspect_ai.model import GenerateConfig
 from inspect_ai.scorer import Scorer, Score, scorer
 from inspect_ai.solver import generate, system_message, use_tools
 
@@ -103,6 +104,9 @@ def _build_task(
             generate(),
         ],
         scorer=_make_transcript_scorer(mcp, capability),
+        # Disable Anthropic prompt caching so token_efficiency reflects real usage
+        # and stays comparable across the K=3 providers (no cache-read inflation).
+        config=GenerateConfig(cache_prompt=False),
         metadata={"mcp": mcp, "capability": capability, "benchmark": benchmark.model_dump()},
     )
 
