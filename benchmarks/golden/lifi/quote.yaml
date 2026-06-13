@@ -9,7 +9,10 @@ allowed_tools:
   - get-token
   - get-tokens
   - get-quote
-baseline_tokens: 8000
+# Calibrated from live runs: LI.FI's 25-tool schema + prompt-cache reads put a
+# real quote around 20-40k total tokens. (Other MCPs' baselines are still
+# placeholders pending their own live calibration.)
+baseline_tokens: 40000
 # Confirmed against the live LI.FI get-quote response: the output amount is a
 # (stringified) integer at estimate.toAmount.
 expected_data:

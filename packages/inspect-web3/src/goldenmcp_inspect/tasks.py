@@ -40,14 +40,6 @@ def _parse_json(text: str):
         return None
 
 
-def _usage_tokens(usage) -> int:
-    """Token count from an Inspect ModelUsage, tolerant of which fields are set."""
-    total = getattr(usage, "total_tokens", None)
-    if total:
-        return total
-    return (getattr(usage, "input_tokens", 0) or 0) + (getattr(usage, "output_tokens", 0) or 0)
-
-
 def _make_transcript_scorer(mcp: str, capability: str) -> Scorer:
     benchmark = load_benchmark(mcp, capability)
 
@@ -55,7 +47,6 @@ def _make_transcript_scorer(mcp: str, capability: str) -> Scorer:
     def goldenmcp_scorer() -> Scorer:
         async def score(state, target):
             events = []
-            total_tokens = 0
             structured: dict = {}
             for msg in state.messages:
                 if hasattr(msg, "tool_calls") and msg.tool_calls:
@@ -73,8 +64,10 @@ def _make_transcript_scorer(mcp: str, capability: str) -> Scorer:
                     parsed = _parse_json(getattr(msg, "text", "") or "")
                     if isinstance(parsed, dict):
                         structured.update(parsed)
-                if hasattr(msg, "usage") and msg.usage:
-                    total_tokens += _usage_tokens(msg.usage)
+
+            # Cumulative tokens for the sample live on TaskState (sample.model_usage),
+            # NOT on individual messages — reading per-message usage always yielded 0.
+            total_tokens = getattr(state, "token_usage", 0) or 0
 
             output_text = state.output.completion if state.output else ""
             transcript = EvalTranscript(
