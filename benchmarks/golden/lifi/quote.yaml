@@ -1,11 +1,11 @@
 expected_path:
-  - get_chains
-  - get_tokens
-  - get_quote
+  - get-chains
+  - get-tokens
+  - get-quote
 allowed_tools:
-  - get_chains
-  - get_tokens
-  - get_quote
+  - get-chains
+  - get-tokens
+  - get-quote
 baseline_tokens: 8000
 expected_data:
   quote.amount_out:

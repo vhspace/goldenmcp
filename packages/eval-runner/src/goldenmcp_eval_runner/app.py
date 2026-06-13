@@ -96,8 +96,6 @@ def run_eval(request: EvalRequest):
 def trigger_inspect_eval(mcp: str, capability: str, model: str = "openai/gpt-4o-mini"):
     """Trigger real Inspect CLI eval subprocess."""
     task_name = f"goldenmcp/{mcp}_{capability}".replace("-", "_")
-    if mcp == "0x":
-        task_name = f"goldenmcp/zerox_{capability}"
     cmd = ["uv", "run", "inspect", "eval", task_name, "--model", model]
     logger.info("running inspect: %s", " ".join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True, cwd=os.getcwd())

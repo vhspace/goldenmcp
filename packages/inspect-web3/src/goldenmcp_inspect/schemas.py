@@ -21,6 +21,9 @@ class GoldenBenchmark(BaseModel):
     expected_path: list[str] = Field(default_factory=list)
     baseline_tokens: int = 4096
     allowed_tools: list[str] = Field(default_factory=list)
+    # Security policy (e.g. {"forbidden_actions": [...]}). Top-level in the golden
+    # YAML, kept off expected_data so the security gate can read it.
+    policy: dict[str, Any] = Field(default_factory=dict)
     data_fields: list[ExpectedDataField] = Field(default_factory=list)
 
 

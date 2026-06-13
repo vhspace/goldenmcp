@@ -4,37 +4,47 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import uuid
 
 from inspect_ai import Task, task
 from inspect_ai.dataset import Sample
 from inspect_ai.scorer import Scorer, Score, scorer
 from inspect_ai.solver import generate, use_tools
-from inspect_ai.tool import mcp_server_http
 
 from goldenmcp_inspect.benchmarks import load_benchmark
-from goldenmcp_inspect.manifest import build_manifest, manifest_to_json
+from goldenmcp_inspect.eval_chains import (
+    JUPITER_POSITIONS_PROMPT,
+    JUPITER_QUOTE_PROMPT,
+    KYBERSWAP_QUOTE_PROMPT,
+    KYBERSWAP_ROUTE_PROMPT,
+    LIFI_QUOTE_PROMPT,
+    LIFI_ROUTE_PROMPT,
+    ODOS_QUOTE_PROMPT,
+    ODOS_SWAP_PROMPT,
+    ONEINCH_QUOTE_PROMPT,
+    ONEINCH_SWAP_PROMPT,
+    UNISWAP_QUOTE_PROMPT,
+    UNISWAP_SWAP_PROMPT,
+)
+from goldenmcp_inspect.mcp_connectors import build_mcp_server
 from goldenmcp_inspect.schemas import EvalTranscript, TranscriptEvent
 from goldenmcp_inspect.scorers import score_transcript
 
 logger = logging.getLogger(__name__)
 
-MCP_URLS = {
-    "lifi": os.environ.get("LIFI_MCP_URL", ""),
-    "0x": os.environ.get("ZEROX_MCP_URL", ""),
-    "uniswap": os.environ.get("UNISWAP_MCP_URL", ""),
-}
+
+def _parse_json(text: str):
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return None
 
 
-def _require_mcp_url(vendor: str) -> str:
-    url = MCP_URLS.get(vendor, "")
-    if not url:
-        raise EnvironmentError(
-            f"{vendor.upper()}_MCP_URL is not set. "
-            f"Set the live MCP endpoint in .env — no mock fallback."
-        )
-    return url
+def _usage_tokens(usage) -> int:
+    """Token count from an Inspect ModelUsage, tolerant of which fields are set."""
+    total = getattr(usage, "total_tokens", None)
+    if total:
+        return total
+    return (getattr(usage, "input_tokens", 0) or 0) + (getattr(usage, "output_tokens", 0) or 0)
 
 
 def _make_transcript_scorer(mcp: str, capability: str) -> Scorer:
@@ -45,6 +55,7 @@ def _make_transcript_scorer(mcp: str, capability: str) -> Scorer:
         async def score(state, target):
             events = []
             total_tokens = 0
+            structured: dict = {}
             for msg in state.messages:
                 if hasattr(msg, "tool_calls") and msg.tool_calls:
                     for tc in msg.tool_calls:
@@ -55,15 +66,21 @@ def _make_transcript_scorer(mcp: str, capability: str) -> Scorer:
                                 content=json.dumps(tc.arguments) if tc.arguments else "",
                             )
                         )
+                # Merge structured tool *results* so DataScore can match expected_data
+                # keys against real tool output (not just the completion text).
+                if getattr(msg, "role", None) == "tool":
+                    parsed = _parse_json(getattr(msg, "text", "") or "")
+                    if isinstance(parsed, dict):
+                        structured.update(parsed)
                 if hasattr(msg, "usage") and msg.usage:
-                    total_tokens += getattr(msg.usage, "total_tokens", 0) or 0
+                    total_tokens += _usage_tokens(msg.usage)
 
             output_text = state.output.completion if state.output else ""
             transcript = EvalTranscript(
                 mcp=mcp,
                 capability=capability,
                 events=events,
-                final_output={"text": output_text},
+                final_output={**structured, "text": output_text},
                 total_tokens=total_tokens,
             )
             result = score_transcript(transcript, benchmark)
@@ -76,13 +93,18 @@ def _make_transcript_scorer(mcp: str, capability: str) -> Scorer:
     return goldenmcp_scorer()
 
 
-def _build_task(mcp: str, capability: str, prompt: str) -> Task:
+def _build_task(
+    mcp: str,
+    capability: str,
+    prompt: str,
+    *,
+    require_wallet: bool = False,
+) -> Task:
     benchmark = load_benchmark(mcp, capability)
-    url = _require_mcp_url(mcp)
     return Task(
         dataset=[Sample(input=prompt)],
         solver=[
-            use_tools(mcp_server_http(url=url, name=f"{mcp}-mcp")),
+            use_tools(build_mcp_server(mcp, require_wallet=require_wallet)),
             generate(),
         ],
         scorer=_make_transcript_scorer(mcp, capability),
@@ -92,47 +114,64 @@ def _build_task(mcp: str, capability: str, prompt: str) -> Task:
 
 @task
 def lifi_quote():
-    return _build_task(
-        "lifi",
-        "quote",
-        "Use the LI.FI MCP to get a quote for swapping 1 ETH to USDC on Ethereum mainnet. "
-        "Follow: get_chains, get_tokens, get_quote. Return the quote details.",
-    )
+    return _build_task("lifi", "quote", LIFI_QUOTE_PROMPT)
 
 
 @task
 def lifi_route():
-    return _build_task(
-        "lifi",
-        "route",
-        "Use the LI.FI MCP to find the best route for 1 ETH to USDC. "
-        "Follow: get_chains, get_routes, get_best_route.",
-    )
+    return _build_task("lifi", "route", LIFI_ROUTE_PROMPT)
 
 
 @task
-def zerox_quote():
-    return _build_task("0x", "quote", "Use the 0x MCP to get a price quote for ETH to USDC.")
+def odos_quote():
+    return _build_task("odos", "quote", ODOS_QUOTE_PROMPT)
 
 
 @task
-def zerox_trade():
+def odos_swap():
     return _build_task(
-        "0x",
-        "trade",
-        "Use the 0x MCP to get a quote and submit a trade for a small ETH to USDC swap on testnet.",
+        "odos",
+        "swap",
+        ODOS_SWAP_PROMPT,
+        require_wallet=True,
     )
 
 
 @task
 def uniswap_quote():
-    return _build_task("uniswap", "quote", "Use the Uniswap MCP to quote ETH to USDC.")
+    return _build_task("uniswap", "quote", UNISWAP_QUOTE_PROMPT)
 
 
 @task
 def uniswap_swap():
-    return _build_task(
-        "uniswap",
-        "swap",
-        "Use the Uniswap MCP to quote and execute a small ETH to USDC swap on testnet.",
-    )
+    return _build_task("uniswap", "swap", UNISWAP_SWAP_PROMPT)
+
+
+@task
+def oneinch_quote():
+    return _build_task("1inch", "quote", ONEINCH_QUOTE_PROMPT)
+
+
+@task
+def oneinch_swap():
+    return _build_task("1inch", "swap", ONEINCH_SWAP_PROMPT)
+
+
+@task
+def kyberswap_quote():
+    return _build_task("kyberswap", "quote", KYBERSWAP_QUOTE_PROMPT)
+
+
+@task
+def kyberswap_route():
+    return _build_task("kyberswap", "route", KYBERSWAP_ROUTE_PROMPT)
+
+
+@task
+def jupiter_quote():
+    return _build_task("jupiter", "quote", JUPITER_QUOTE_PROMPT)
+
+
+@task
+def jupiter_positions():
+    return _build_task("jupiter", "positions", JUPITER_POSITIONS_PROMPT)

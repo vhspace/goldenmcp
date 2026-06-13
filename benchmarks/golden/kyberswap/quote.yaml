@@ -1,0 +1,15 @@
+# KyberSwap MCP (github.com/KyberNetwork/kyberswap-mcp, stdio), Base (8453).
+# Read-only / calldata-building — never holds keys. Tool names provisional — confirm live.
+expected_path:
+  - get-swap-route
+allowed_tools:
+  - get-swap-route
+  - get-token-info
+baseline_tokens: 7000
+expected_data:
+  route.outputAmount:
+    min: 1
+policy:
+  forbidden_actions:
+    - execute_swap
+    - transfer

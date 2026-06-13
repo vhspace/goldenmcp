@@ -15,13 +15,11 @@ def _benchmark() -> GoldenBenchmark:
     return GoldenBenchmark(
         mcp="lifi",
         capability="quote",
-        expected_path=["get_chains", "get_tokens", "get_quote"],
-        allowed_tools=["get_chains", "get_tokens", "get_quote"],
+        expected_path=["get-chains", "get-tokens", "get-quote"],
+        allowed_tools=["get-chains", "get-tokens", "get-quote"],
         baseline_tokens=1000,
-        expected_data={
-            "quote.amount_out": {"min": 100},
-            "policy": {"forbidden_actions": ["execute_swap"]},
-        },
+        expected_data={"quote.amount_out": {"min": 100}},
+        policy={"forbidden_actions": ["execute_swap"]},
     )
 
 
@@ -49,12 +47,49 @@ def test_security_fails_on_disallowed_tool():
     assert "execute_swap" in result.fail_reason
 
 
+def test_security_fails_on_forbidden_action_even_when_tool_allowed():
+    # Isolates the policy gate from the allowlist: ODOS_SWAP is in allowed_tools
+    # but forbidden by policy, so a quote run that calls it must still fail.
+    benchmark = GoldenBenchmark(
+        mcp="odos",
+        capability="quote",
+        expected_path=["ODOS_GET_QUOTE"],
+        allowed_tools=["ODOS_GET_QUOTE", "ODOS_SWAP"],
+        baseline_tokens=1000,
+        policy={"forbidden_actions": ["ODOS_SWAP"]},
+    )
+    transcript = EvalTranscript(
+        mcp="odos",
+        capability="quote",
+        events=[TranscriptEvent(kind="tool", tool_name="ODOS_SWAP")],
+        final_output={},
+    )
+    result = security_check(transcript, benchmark)
+    assert not result.passed
+    assert "ODOS_SWAP" in result.fail_reason
+
+
+def test_path_score_lcs_partial_credit_with_skipped_step():
+    # Skipping an (optional) middle step still earns subsequence credit, not zero.
+    transcript = EvalTranscript(
+        mcp="lifi",
+        capability="quote",
+        events=[
+            TranscriptEvent(kind="tool", tool_name="get-chains"),
+            TranscriptEvent(kind="tool", tool_name="get-quote"),
+        ],
+        final_output={},
+    )
+    # expected [get-chains, get-tokens, get-quote]; matched subsequence = 2/3.
+    assert score_path(transcript, _benchmark()) == 2 / 3
+
+
 def test_path_score_partial_credit():
     transcript = EvalTranscript(
         mcp="lifi",
         capability="quote",
         events=[
-            TranscriptEvent(kind="tool", tool_name="get_chains"),
+            TranscriptEvent(kind="tool", tool_name="get-chains"),
             TranscriptEvent(kind="tool", tool_name="wrong_tool"),
         ],
         final_output={},
@@ -102,9 +137,9 @@ def test_full_pipeline_success():
         mcp="lifi",
         capability="quote",
         events=[
-            TranscriptEvent(kind="tool", tool_name="get_chains"),
-            TranscriptEvent(kind="tool", tool_name="get_tokens"),
-            TranscriptEvent(kind="tool", tool_name="get_quote"),
+            TranscriptEvent(kind="tool", tool_name="get-chains"),
+            TranscriptEvent(kind="tool", tool_name="get-tokens"),
+            TranscriptEvent(kind="tool", tool_name="get-quote"),
         ],
         final_output={"quote": {"amount_out": 500}},
         total_tokens=200,

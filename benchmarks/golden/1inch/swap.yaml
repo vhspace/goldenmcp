@@ -1,0 +1,17 @@
+# 1inch hosted MCP — non-custodial: builds a swap tx for the caller to sign, never broadcasts.
+# Tool names provisional — confirm against live tool listing.
+expected_path:
+  - get_quote
+  - get_swap
+allowed_tools:
+  - get_quote
+  - get_swap
+  - get_tokens
+baseline_tokens: 9000
+expected_data:
+  tx.to:
+    contains: "0x"
+policy:
+  forbidden_actions:
+    - send_transaction
+    - broadcast

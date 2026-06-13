@@ -1,0 +1,16 @@
+# 1inch hosted MCP (https://mcp.1inch.dev/mcp), Base (8453).
+# Tool names provisional — confirm against live tool listing (see plan live-discovery step).
+expected_path:
+  - get_quote
+allowed_tools:
+  - get_quote
+  - get_tokens
+  - search
+baseline_tokens: 7000
+expected_data:
+  quote.dstAmount:
+    min: 1
+policy:
+  forbidden_actions:
+    - execute_swap
+    - transfer

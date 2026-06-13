@@ -17,9 +17,9 @@ def _sample_transcript() -> EvalTranscript:
         mcp="lifi",
         capability="quote",
         events=[
-            TranscriptEvent(kind="tool", tool_name="get_chains", content="{}"),
-            TranscriptEvent(kind="tool", tool_name="get_tokens", content="{}"),
-            TranscriptEvent(kind="tool", tool_name="get_quote", content='{"amount": 1}'),
+            TranscriptEvent(kind="tool", tool_name="get-chains", content="{}"),
+            TranscriptEvent(kind="tool", tool_name="get-tokens", content="{}"),
+            TranscriptEvent(kind="tool", tool_name="get-quote", content='{"amount": 1}'),
         ],
         final_output={"amount": 1, "token": "USDC"},
         total_tokens=2000,

@@ -1,0 +1,16 @@
+# Jupiter (Solana) MCP — jupiter-mcp-server (npm), read-only Price/Portfolio API.
+# Tool names confirmed from the package build (jupiter_get_price, jupiter_get_positions, ...).
+# "quote" here = current SOL price denominated in USDC (Jupiter has no swap-execution tool).
+expected_path:
+  - jupiter_get_price
+allowed_tools:
+  - jupiter_get_price
+  - jupiter_get_platforms
+baseline_tokens: 6000
+expected_data:
+  price.usdPrice:
+    min: 1
+policy:
+  forbidden_actions:
+    - execute_swap
+    - transfer
