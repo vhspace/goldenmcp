@@ -125,6 +125,12 @@ def score_to_bps(score: float) -> int:
     return int(round(max(0.0, min(1.0, score)) * 10000))
 
 
+def _format_bytes32(value: bytes | bytearray | str) -> str:
+    """0x-prefix a bytes32; return '' for the all-zero (unset) value."""
+    raw = value.hex() if isinstance(value, (bytes, bytearray)) else str(value).replace("0x", "")
+    return f"0x{raw}" if raw and int(raw, 16) != 0 else ""
+
+
 class RegistryClient:
     def __init__(self, settings: IdentitySettings | None = None):
         self.settings = settings or IdentitySettings()
@@ -212,7 +218,7 @@ class RegistryClient:
             agent_uri=rec[2],
             ens_name=rec[3],
             last_attestation_id=rec[4],
-            last_transcript_hash=rec[5].hex() if isinstance(rec[5], (bytes, bytearray)) else str(rec[5]),
+            last_transcript_hash=_format_bytes32(rec[5]),
         )
 
     def list_agent_ids(self, max_id: int = 100) -> list[int]:
