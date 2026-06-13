@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import urllib.parse
 from dataclasses import dataclass
 
 from inspect_ai.tool import mcp_server_http, mcp_server_stdio
@@ -72,15 +73,56 @@ def _optional_env(mapping: dict[str, str]) -> dict[str, str]:
     return out
 
 
+# @iqai/mcp-odos (v0.1.2) hardcodes its Odos REST call with only a Content-Type
+# header (see package/dist/services/get-quote.js) — it has NO env var or config
+# hook for an API key, so the public api.odos.xyz endpoint IP-rate-limits the eval
+# with HTTP 429 ("Register for an API key for higher limits"). The Odos API accepts
+# the key as `x-api-key` (Authorization: Bearer is NOT accepted — it still 429s).
+#
+# Since the server is launched as an npx child process, we inject the header from
+# outside via a Node `--import` preload (a documented Node mechanism, not a patch of
+# the package internals): the shim wraps the global `fetch` to add `x-api-key` on
+# any request to api.odos.xyz. It keys only off the destination host + the presence
+# of ODOS_API_KEY, so it survives changes to the package's request-building code and
+# is a no-op when the key is unset. The shim is passed as a data: URL so no temp
+# file is created. The key is read from the child's env at runtime — never inlined.
+_ODOS_FETCH_SHIM = (
+    "const _f=globalThis.fetch;"
+    "const k=process.env.ODOS_API_KEY;"
+    "globalThis.fetch=(u,o={})=>{"
+    "try{const s=typeof u===\"string\"?u:(u&&u.url)||\"\";"
+    'if(k&&s.includes("api.odos.xyz")){'
+    'o={...o,headers:{...(o.headers||{}),"x-api-key":k}};}}'
+    "catch(e){}"
+    "return _f(u,o);};"
+)
+
+
+def _odos_node_options() -> str:
+    """`--import` arg that preloads the fetch shim that injects the Odos API key."""
+    encoded = urllib.parse.quote(_ODOS_FETCH_SHIM)
+    return f"--import data:text/javascript,{encoded}"
+
+
 def odos_stdio_env(*, require_wallet: bool) -> dict[str, str]:
+    env: dict[str, str] = {}
     wallet = os.environ.get("WALLET_PRIVATE_KEY", "")
     if require_wallet and not wallet:
         raise EnvironmentError(
             "WALLET_PRIVATE_KEY is not set. Required for Odos swap evals — no mock fallback."
         )
     if wallet:
-        return {"WALLET_PRIVATE_KEY": wallet}
-    return {}
+        # @iqai/mcp-odos requires the key even for a read-only quote, and its viem
+        # parser rejects a 0x-prefixed string ("expected hex or 32 bytes, got
+        # string") — it wants the bare 64-hex-char key. Strip a leading 0x.
+        env["WALLET_PRIVATE_KEY"] = wallet[2:] if wallet.startswith("0x") else wallet
+
+    api_key = os.environ.get("ODOS_API_KEY", "")
+    if api_key:
+        # Pass the key through to the child and preload the fetch shim that uses it.
+        env["ODOS_API_KEY"] = api_key
+        env["NODE_OPTIONS"] = _odos_node_options()
+    return env
 
 
 def odos_stdio_config(*, require_wallet: bool = False) -> StdioMcpConfig:

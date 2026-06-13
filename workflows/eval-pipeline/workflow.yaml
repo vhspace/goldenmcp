@@ -1,9 +1,17 @@
-workflow-name: goldenmcp-eval-pipeline
-workflow-path: ./src/workflow.ts
+# Local simulate: skip CAI by default, score-only path for lifi/quote.
+staging-simulate:
+  user-workflow:
+    workflow-name: goldenmcp-eval-pipeline
+  workflow-artifacts:
+    workflow-path: ./src/workflow.ts
+    config-path: ./config.staging-simulate.json
+    secrets-path: ./secrets.yaml
 
+# Production-like staging (CAI URL set — requires CHAINLINK_CAI_API_KEY secret).
 staging-settings:
-  schedule: "0 */6 * * *"
-  evalRunnerUrl: "http://localhost:8090"
-  walrusAggregatorUrl: "https://aggregator.walrus-testnet.walrus.space"
-  arcRegistryAddress: ""
-  chainlinkCaiUrl: ""
+  user-workflow:
+    workflow-name: goldenmcp-eval-pipeline
+  workflow-artifacts:
+    workflow-path: ./src/workflow.ts
+    config-path: ./config.staging-settings.json
+    secrets-path: ./secrets.yaml

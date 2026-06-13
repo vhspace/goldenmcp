@@ -7,8 +7,12 @@ allowed_tools:
   - ODOS_GET_CHAIN_ID
   - ODOS_GET_QUOTE
 baseline_tokens: 8000
+# ODOS_GET_QUOTE returns the output amount at top-level `outAmounts` (array of
+# decimal STRINGS in base units, e.g. ["1675763"]) — there is no `quote` wrapper
+# and no singular `outAmount`. `outAmounts.0` indexes the first element; the min
+# check coerces the stringified base-unit amount via _as_number.
 expected_data:
-  quote.outAmount:
+  outAmounts.0:
     min: 1
 policy:
   forbidden_actions:
