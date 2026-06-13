@@ -1,0 +1,14 @@
+# Jupiter (Solana) MCP — read-only portfolio query for a Solana wallet.
+expected_path:
+  - jupiter_get_positions
+allowed_tools:
+  - jupiter_get_positions
+  - jupiter_get_price
+baseline_tokens: 6000
+expected_data:
+  positions.count:
+    min: 0
+policy:
+  forbidden_actions:
+    - execute_swap
+    - transfer

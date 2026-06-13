@@ -4,37 +4,32 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import uuid
 
 from inspect_ai import Task, task
 from inspect_ai.dataset import Sample
 from inspect_ai.scorer import Scorer, Score, scorer
 from inspect_ai.solver import generate, use_tools
-from inspect_ai.tool import mcp_server_http
 
 from goldenmcp_inspect.benchmarks import load_benchmark
-from goldenmcp_inspect.manifest import build_manifest, manifest_to_json
+from goldenmcp_inspect.eval_chains import (
+    JUPITER_POSITIONS_PROMPT,
+    JUPITER_QUOTE_PROMPT,
+    KYBERSWAP_QUOTE_PROMPT,
+    KYBERSWAP_ROUTE_PROMPT,
+    LIFI_QUOTE_PROMPT,
+    LIFI_ROUTE_PROMPT,
+    ODOS_QUOTE_PROMPT,
+    ODOS_SWAP_PROMPT,
+    ONEINCH_QUOTE_PROMPT,
+    ONEINCH_SWAP_PROMPT,
+    UNISWAP_QUOTE_PROMPT,
+    UNISWAP_SWAP_PROMPT,
+)
+from goldenmcp_inspect.mcp_connectors import build_mcp_server
 from goldenmcp_inspect.schemas import EvalTranscript, TranscriptEvent
 from goldenmcp_inspect.scorers import score_transcript
 
 logger = logging.getLogger(__name__)
-
-MCP_URLS = {
-    "lifi": os.environ.get("LIFI_MCP_URL", ""),
-    "0x": os.environ.get("ZEROX_MCP_URL", ""),
-    "uniswap": os.environ.get("UNISWAP_MCP_URL", ""),
-}
-
-
-def _require_mcp_url(vendor: str) -> str:
-    url = MCP_URLS.get(vendor, "")
-    if not url:
-        raise EnvironmentError(
-            f"{vendor.upper()}_MCP_URL is not set. "
-            f"Set the live MCP endpoint in .env — no mock fallback."
-        )
-    return url
 
 
 def _make_transcript_scorer(mcp: str, capability: str) -> Scorer:
@@ -76,13 +71,18 @@ def _make_transcript_scorer(mcp: str, capability: str) -> Scorer:
     return goldenmcp_scorer()
 
 
-def _build_task(mcp: str, capability: str, prompt: str) -> Task:
+def _build_task(
+    mcp: str,
+    capability: str,
+    prompt: str,
+    *,
+    require_wallet: bool = False,
+) -> Task:
     benchmark = load_benchmark(mcp, capability)
-    url = _require_mcp_url(mcp)
     return Task(
         dataset=[Sample(input=prompt)],
         solver=[
-            use_tools(mcp_server_http(url=url, name=f"{mcp}-mcp")),
+            use_tools(build_mcp_server(mcp, require_wallet=require_wallet)),
             generate(),
         ],
         scorer=_make_transcript_scorer(mcp, capability),
@@ -92,47 +92,64 @@ def _build_task(mcp: str, capability: str, prompt: str) -> Task:
 
 @task
 def lifi_quote():
-    return _build_task(
-        "lifi",
-        "quote",
-        "Use the LI.FI MCP to get a quote for swapping 1 ETH to USDC on Ethereum mainnet. "
-        "Follow: get_chains, get_tokens, get_quote. Return the quote details.",
-    )
+    return _build_task("lifi", "quote", LIFI_QUOTE_PROMPT)
 
 
 @task
 def lifi_route():
-    return _build_task(
-        "lifi",
-        "route",
-        "Use the LI.FI MCP to find the best route for 1 ETH to USDC. "
-        "Follow: get_chains, get_routes, get_best_route.",
-    )
+    return _build_task("lifi", "route", LIFI_ROUTE_PROMPT)
 
 
 @task
-def zerox_quote():
-    return _build_task("0x", "quote", "Use the 0x MCP to get a price quote for ETH to USDC.")
+def odos_quote():
+    return _build_task("odos", "quote", ODOS_QUOTE_PROMPT)
 
 
 @task
-def zerox_trade():
+def odos_swap():
     return _build_task(
-        "0x",
-        "trade",
-        "Use the 0x MCP to get a quote and submit a trade for a small ETH to USDC swap on testnet.",
+        "odos",
+        "swap",
+        ODOS_SWAP_PROMPT,
+        require_wallet=True,
     )
 
 
 @task
 def uniswap_quote():
-    return _build_task("uniswap", "quote", "Use the Uniswap MCP to quote ETH to USDC.")
+    return _build_task("uniswap", "quote", UNISWAP_QUOTE_PROMPT)
 
 
 @task
 def uniswap_swap():
-    return _build_task(
-        "uniswap",
-        "swap",
-        "Use the Uniswap MCP to quote and execute a small ETH to USDC swap on testnet.",
-    )
+    return _build_task("uniswap", "swap", UNISWAP_SWAP_PROMPT)
+
+
+@task
+def oneinch_quote():
+    return _build_task("1inch", "quote", ONEINCH_QUOTE_PROMPT)
+
+
+@task
+def oneinch_swap():
+    return _build_task("1inch", "swap", ONEINCH_SWAP_PROMPT)
+
+
+@task
+def kyberswap_quote():
+    return _build_task("kyberswap", "quote", KYBERSWAP_QUOTE_PROMPT)
+
+
+@task
+def kyberswap_route():
+    return _build_task("kyberswap", "route", KYBERSWAP_ROUTE_PROMPT)
+
+
+@task
+def jupiter_quote():
+    return _build_task("jupiter", "quote", JUPITER_QUOTE_PROMPT)
+
+
+@task
+def jupiter_positions():
+    return _build_task("jupiter", "positions", JUPITER_POSITIONS_PROMPT)

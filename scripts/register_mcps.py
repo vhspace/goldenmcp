@@ -21,10 +21,10 @@ DEFAULT_MCPS = [
         "ens_name": "lifi-quote.goldenmcp.eth",
     },
     {
-        "name": "0x",
-        "mcp_endpoint": os.environ.get("ZEROX_MCP_URL", ""),
-        "agent_uri": "walrus://manifests/0x",
-        "ens_name": "0x-quote.goldenmcp.eth",
+        "name": "odos",
+        "mcp_endpoint": "stdio:npx/@iqai/mcp-odos",
+        "agent_uri": "walrus://manifests/odos",
+        "ens_name": "odos-quote.goldenmcp.eth",
     },
     {
         "name": "uniswap",
@@ -40,9 +40,12 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="Validate env only")
     args = parser.parse_args()
 
-    missing = [m["name"] for m in DEFAULT_MCPS if not m["mcp_endpoint"]]
-    if missing:
-        logger.error("Missing MCP URLs for: %s — set LIFI_MCP_URL, ZEROX_MCP_URL, UNISWAP_MCP_URL", missing)
+    url_missing = [m["name"] for m in DEFAULT_MCPS if not m["mcp_endpoint"]]
+    if url_missing:
+        logger.error(
+            "Missing MCP endpoints for: %s — set LIFI_MCP_URL, UNISWAP_MCP_URL (odos is stdio)",
+            url_missing,
+        )
         return 1
 
     if args.dry_run:

@@ -1,12 +1,13 @@
 expected_path:
-  - get_quote
-  - submit_trade
+  - ODOS_GET_QUOTE
+  - ODOS_SWAP
 allowed_tools:
-  - get_quote
-  - submit_trade
+  - ODOS_GET_CHAIN_ID
+  - ODOS_GET_QUOTE
+  - ODOS_SWAP
 baseline_tokens: 12000
 expected_data:
-  trade.tx_hash:
+  swap.txHash:
     contains: "0x"
 policy:
   forbidden_actions: []

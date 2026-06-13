@@ -1,0 +1,13 @@
+expected_path:
+  - ODOS_GET_CHAIN_ID
+  - ODOS_GET_QUOTE
+allowed_tools:
+  - ODOS_GET_CHAIN_ID
+  - ODOS_GET_QUOTE
+baseline_tokens: 6000
+expected_data:
+  quote.outAmount:
+    min: 1
+policy:
+  forbidden_actions:
+    - ODOS_SWAP

@@ -18,8 +18,9 @@ uv sync --all-packages
 # Run unit tests
 uv run pytest packages/ -v
 
-# Run eval (requires OPENAI_API_KEY + MCP endpoints in .env)
-uv run inspect eval goldenmcp/lifi_quote --model openai/gpt-4o-mini
+# Run eval (requires LLM key + MCP endpoints in .env)
+uv run inspect eval goldenmcp/lifi_quote --model anthropic/claude-3-5-haiku-20241022
+uv run inspect eval goldenmcp/odos_quote --model anthropic/claude-3-5-haiku-20241022
 
 # Eval runner HTTP service (for CRE)
 uv run python -m goldenmcp_eval_runner
@@ -34,7 +35,15 @@ uv run python -m goldenmcp_marketplace
 uv run python demo/lookup_agent.py --capability quote --min-score 0.9
 ```
 
-Copy `.env.example` to `.env` and fill in credentials.
+Copy `.env.example` to `.env` and fill in credentials, or bootstrap eval env on a demo machine:
+
+```bash
+chmod +x scripts/setup_eval_env.sh
+./scripts/setup_eval_env.sh          # generates cast wallet, sets MCP URLs, uv sync
+./scripts/setup_eval_env.sh --check  # prerequisites only
+```
+
+Eval chain defaults: **Base (8453)** for quote evals; **Fraxtal (252)** for `odos_swap`. Fund `EVM_EVAL_ADDRESS` on Base (+ Fraxtal for Odos swaps). ENS identity uses Sepolia separately.
 
 ## Scoring
 

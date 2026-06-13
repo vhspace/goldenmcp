@@ -15,8 +15,8 @@ def _benchmark() -> GoldenBenchmark:
     return GoldenBenchmark(
         mcp="lifi",
         capability="quote",
-        expected_path=["get_chains", "get_tokens", "get_quote"],
-        allowed_tools=["get_chains", "get_tokens", "get_quote"],
+        expected_path=["get-chains", "get-tokens", "get-quote"],
+        allowed_tools=["get-chains", "get-tokens", "get-quote"],
         baseline_tokens=1000,
         expected_data={
             "quote.amount_out": {"min": 100},
@@ -54,7 +54,7 @@ def test_path_score_partial_credit():
         mcp="lifi",
         capability="quote",
         events=[
-            TranscriptEvent(kind="tool", tool_name="get_chains"),
+            TranscriptEvent(kind="tool", tool_name="get-chains"),
             TranscriptEvent(kind="tool", tool_name="wrong_tool"),
         ],
         final_output={},
@@ -102,9 +102,9 @@ def test_full_pipeline_success():
         mcp="lifi",
         capability="quote",
         events=[
-            TranscriptEvent(kind="tool", tool_name="get_chains"),
-            TranscriptEvent(kind="tool", tool_name="get_tokens"),
-            TranscriptEvent(kind="tool", tool_name="get_quote"),
+            TranscriptEvent(kind="tool", tool_name="get-chains"),
+            TranscriptEvent(kind="tool", tool_name="get-tokens"),
+            TranscriptEvent(kind="tool", tool_name="get-quote"),
         ],
         final_output={"quote": {"amount_out": 500}},
         total_tokens=200,

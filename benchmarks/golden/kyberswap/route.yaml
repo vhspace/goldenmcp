@@ -1,0 +1,17 @@
+# KyberSwap MCP — route discovery + calldata build. Returns (to, data, value) to sign externally.
+# Tool names provisional — confirm against live tool listing.
+expected_path:
+  - get-swap-route
+  - swap-build
+allowed_tools:
+  - get-swap-route
+  - swap-build
+  - swap-simulate
+baseline_tokens: 9000
+expected_data:
+  route.routeSummary:
+    min: 1
+policy:
+  forbidden_actions:
+    - send_transaction
+    - broadcast

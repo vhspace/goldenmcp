@@ -1,11 +1,11 @@
 expected_path:
-  - get_chains
-  - get_routes
-  - get_best_route
+  - get-chains
+  - get-routes
+  - get-step-transaction
 allowed_tools:
-  - get_chains
-  - get_routes
-  - get_best_route
+  - get-chains
+  - get-routes
+  - get-step-transaction
 baseline_tokens: 10000
 expected_data:
   route.steps:
