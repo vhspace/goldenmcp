@@ -45,6 +45,20 @@ chmod +x scripts/setup_eval_env.sh
 
 Eval chain defaults: **Base (8453)** for quote evals; **Fraxtal (252)** for `odos_swap`. Fund `EVM_EVAL_ADDRESS` on Base (+ Fraxtal for Odos swaps). ENS identity uses Sepolia separately.
 
+### Walrus + Inspect View
+
+GoldenMCP stores eval logs on Walrus with an indexed `walrus://` path (S3-style keys over content-addressed blobs). After the first upload, set `WALRUS_INDEX_BLOB_ID` in `.env` to the printed index blob ID.
+
+```bash
+# Upload scored eval + raw Inspect log bytes
+uv run python scripts/post_eval_walrus.py --mcp lifi --capability quote --log ./logs/your-run.json
+
+# List logs from Walrus (same as s3:// log-dir)
+uv run inspect view start --log-dir walrus://evals/goldenmcp
+```
+
+Inspect View requires native `.eval` / JSON log files at indexed paths — not score-manifest JSON alone.
+
 ## Scoring
 
 | Dimension | Weight |
