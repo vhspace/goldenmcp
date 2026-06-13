@@ -27,3 +27,13 @@ output "sync_secrets_command" {
   description = "Copy local .env secrets to the droplet after apply"
   value       = "../../../scripts/sync-eval-runner-secrets.sh ${digitalocean_droplet.eval_runner.ipv4_address}"
 }
+
+output "ssh_key_names" {
+  description = "DigitalOcean SSH key names attached to the droplet"
+  value       = var.ssh_key_names
+}
+
+output "ssh_key_fingerprints" {
+  description = "SSH key fingerprints attached to the droplet"
+  value       = [for k in data.digitalocean_ssh_key.operator : k.fingerprint]
+}
