@@ -125,10 +125,15 @@ export function parseCaiAttestation(output: string): CaiAttestation {
 }
 
 function runtimeSleep(runtime: Runtime<Config>, ms: number): void {
-  const maybeSleep = runtime as Runtime<Config> & { sleep?: (delayMs: number) => void };
-  if (typeof maybeSleep.sleep === "function") {
-    maybeSleep.sleep(ms);
+  // cre workflow simulate (v1.18) traps on runtime.sleep(); useScoreOnly marks simulate config.
+  if (runtime.config.useScoreOnly) {
+    const deadline = runtime.now().getTime() + ms;
+    while (runtime.now().getTime() < deadline) {
+      // busy-wait between poll attempts in local simulate only
+    }
+    return;
   }
+  runtime.sleep(ms);
 }
 
 function authHeaders(token: string): Record<string, string> {
