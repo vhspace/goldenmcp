@@ -1,16 +1,15 @@
-import { fetchLeaderboard } from "@/lib/data";
+import { fetchLeaderboard, type LeaderboardEntry } from "@/lib/data";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
 export default async function LeaderboardPage() {
-  let entries;
+  let entries: LeaderboardEntry[] = [];
   let error = "";
   try {
     entries = await fetchLeaderboard();
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
-    entries = [];
   }
 
   return (
