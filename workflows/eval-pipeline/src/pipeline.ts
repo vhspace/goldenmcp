@@ -111,12 +111,30 @@ function authHeaders(token: string): Record<string, string> {
   return { Authorization: `Bearer ${token}` };
 }
 
+function jsonAuthHeaders(token: string): Record<string, string> {
+  return {
+    ...authHeaders(token),
+    "Content-Type": "application/json",
+  };
+}
+
+export function requireCaiAttestationFields(attestation: CaiAttestation): CaiAttestation {
+  if (!attestation.attestation_id?.trim() && !attestation.attestation_tx_hash?.trim()) {
+    throw new Error(
+      "CAI inference completed but output contained no attestation_id or attestation_tx_hash",
+    );
+  }
+  return attestation;
+}
+
 function requireHttpOk(
   response: ReturnType<ReturnType<HTTPClient["sendRequest"]>["result"]>,
   context: string,
 ): string {
   if (!ok(response)) {
-    throw new Error(`${context}: HTTP ${response.statusCode} — ${text(response)}`);
+    const body = text(response);
+    const snippet = body.length > 500 ? `${body.slice(0, 500)}…` : body;
+    throw new Error(`${context}: HTTP ${response.statusCode} — ${snippet}`);
   }
   return text(response);
 }
@@ -190,7 +208,7 @@ async function runEvalScore(
         url: `${base}/eval/score`,
         method: "POST",
         body,
-        headers: authHeaders(apiKey),
+        headers: jsonAuthHeaders(apiKey),
       })
       .result();
     const bodyText = requireHttpOk(response, `eval/score ${target.mcp}/${target.capability}`);
@@ -220,16 +238,14 @@ export async function caiAttest(
 ): Promise<CaiAttestation> {
   const config = runtime.config;
   const base = config.chainlinkCaiUrl.replace(/\/$/, "");
-  const manifestJson = JSON.stringify(manifest, null, 2);
+  const manifestJson = JSON.stringify(manifest);
   const manifestBase64 = Buffer.from(manifestJson, "utf8").toString("base64");
 
   const submitBody = JSON.stringify({
     model: "gemma4",
     prompt: [
-      "Review this GoldenMCP eval score manifest for consistency and integrity.",
+      "Review the attached manifest.json GoldenMCP eval score manifest for consistency and integrity.",
       "Return JSON only with keys attestation_id (string) and attestation_tx_hash (0x-prefixed hex string when available).",
-      "Manifest:",
-      manifestJson,
     ].join("\n"),
     resources: [
       {
@@ -280,9 +296,11 @@ export async function caiAttest(
     runtime.log(`CAI poll attempt=${attempt}/${config.caiPollMaxAttempts} status=${lastStatus}`);
 
     if (lastStatus === "completed") {
-      const attestation = parseCaiAttestation(pollParsed.output ?? "");
+      const attestation = requireCaiAttestationFields(
+        parseCaiAttestation(pollParsed.output ?? ""),
+      );
       runtime.log(
-        `CAI completed attestation_id=${attestation.attestation_id ?? "(none)"} attestation_tx_hash=${attestation.attestation_tx_hash ?? "(none)"}`,
+        `CAI completed attestation_id=${attestation.attestation_id} attestation_tx_hash=${attestation.attestation_tx_hash ?? "(none)"}`,
       );
       return attestation;
     }
@@ -297,7 +315,6 @@ export async function caiAttest(
   }
 
   finalizeCaiPollStatus(lastStatus);
-  return {};
 }
 
 export async function publishToWalrus(
@@ -324,7 +341,7 @@ export async function publishToWalrus(
       url: `${base}/eval/publish`,
       method: "POST",
       body,
-      headers: authHeaders(apiKey),
+      headers: jsonAuthHeaders(apiKey),
     })
     .result();
   const bodyText = requireHttpOk(response, `eval/publish run_id=${runId}`);

@@ -3,6 +3,7 @@ import {
   finalizeCaiPollStatus,
   isCaiConfigured,
   parseCaiAttestation,
+  requireCaiAttestationFields,
   scoreToBps,
   shouldSkipCai,
 } from "../src/pipeline";
@@ -85,6 +86,22 @@ describe("parseCaiAttestation", () => {
     expect(parseCaiAttestation(output)).toEqual({
       attestation_id: "x",
       attestation_tx_hash: "0xdead",
+    });
+  });
+
+  test("requireCaiAttestationFields throws when output empty", () => {
+    expect(() => requireCaiAttestationFields({})).toThrow(/no attestation_id or attestation_tx_hash/);
+    expect(() => requireCaiAttestationFields({ attestation_id: "  " })).toThrow(
+      /no attestation_id or attestation_tx_hash/,
+    );
+  });
+
+  test("requireCaiAttestationFields accepts id or tx hash", () => {
+    expect(requireCaiAttestationFields({ attestation_id: "att-1" })).toEqual({
+      attestation_id: "att-1",
+    });
+    expect(requireCaiAttestationFields({ attestation_tx_hash: "0xabc" })).toEqual({
+      attestation_tx_hash: "0xabc",
     });
   });
 });

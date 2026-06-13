@@ -4,6 +4,22 @@ import type { Config } from "./types";
 
 const httpClient = new HTTPClient();
 
+function benchmarkKey(mcp: string, capability: string): string {
+  return `${mcp}/${capability}`;
+}
+
+function filterBenchmarks(
+  config: Config,
+  items: Array<{ mcp: string; capability: string }>,
+): Array<{ mcp: string; capability: string }> {
+  const allowlist = config.benchmarkAllowlist?.filter(Boolean) ?? [];
+  if (allowlist.length === 0) {
+    return items;
+  }
+  const allowed = new Set(allowlist);
+  return items.filter((bench) => allowed.has(benchmarkKey(bench.mcp, bench.capability)));
+}
+
 async function onCronTrigger(runtime: Runtime<Config>): Promise<string> {
   const config = runtime.config;
   runtime.log("GoldenMCP eval pipeline cron triggered");
@@ -24,8 +40,21 @@ async function onCronTrigger(runtime: Runtime<Config>): Promise<string> {
   const benchmarks = JSON.parse(text(benchmarksResponse)) as {
     benchmarks?: Array<{ mcp: string; capability: string }>;
   };
-  const items = benchmarks.benchmarks ?? [];
-  runtime.log(`Found ${items.length} benchmarks`);
+  const allItems = benchmarks.benchmarks ?? [];
+  const items = filterBenchmarks(config, allItems);
+  if (items.length !== allItems.length) {
+    runtime.log(
+      `benchmarkAllowlist active — running ${items.length}/${allItems.length} benchmarks: ${items.map((b) => benchmarkKey(b.mcp, b.capability)).join(", ")}`,
+    );
+  } else {
+    runtime.log(`Found ${items.length} benchmarks`);
+  }
+
+  if (config.useScoreOnly && items.length === 0) {
+    throw new Error(
+      "useScoreOnly=true but no benchmarks matched benchmarkAllowlist — set allowlist e.g. lifi/quote",
+    );
+  }
 
   const results: string[] = [];
   for (const bench of items) {

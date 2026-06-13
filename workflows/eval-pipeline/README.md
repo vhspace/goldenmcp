@@ -22,19 +22,27 @@ bun test
 Start eval-runner (from repo root):
 
 ```bash
-uv run --package goldenmcp-eval-runner eval-runner
+EVAL_RUNNER_API_KEY=dev-key uv run --package goldenmcp-eval-runner eval-runner
 ```
 
-For faster simulate without Inspect subprocess, set `useScoreOnly: true` in `workflow.yaml` staging-settings (uses `/eval/score` with a minimal transcript fixture).
+Use the **`staging-simulate`** target (CAI skipped by default, `useScoreOnly` + `lifi/quote` only):
 
 ```bash
 cd workflows/eval-pipeline
-cre workflow simulate goldenmcp-eval-pipeline --target staging-settings
+export EVAL_RUNNER_API_KEY_VAR=dev-key
+cre workflow simulate goldenmcp-eval-pipeline --target staging-simulate
 ```
 
-Secrets (via `.env` or environment, see `secrets.yaml`):
+For full pipeline including CAI, use **`staging-settings`** and set both:
 
-- `EVAL_RUNNER_API_KEY_VAR` — bearer token for eval-runner (`EVAL_RUNNER_API_KEY` in eval-runner env)
-- `CHAINLINK_CAI_API_KEY_VAR` — optional; omit both CAI URL and key to skip attestation in simulate
+- `chainlinkCaiUrl` (already set in yaml)
+- `CHAINLINK_CAI_API_KEY_VAR` in environment / secrets
+
+Secrets (see `secrets.yaml`):
+
+- `EVAL_RUNNER_API_KEY_VAR` — bearer token for eval-runner
+- `CHAINLINK_CAI_API_KEY_VAR` — required when `chainlinkCaiUrl` is non-empty
+
+`useScoreOnly` uses a minimal transcript fixture that only scores **`lifi/quote`** meaningfully. Set `benchmarkAllowlist` when using score-only mode.
 
 Arc writes require `arcRegistryAddress` and CRE `project.yaml` EVM RPC for `arc-testnet`.
