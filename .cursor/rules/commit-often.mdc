@@ -1,5 +1,5 @@
 ---
-description: Commit working changes frequently; do not let large uncommitted diffs accumulate
+description: Commit often and merge via pull requests; do not push directly to main
 alwaysApply: true
 ---
 
@@ -11,3 +11,11 @@ alwaysApply: true
 - Ask the user before committing only when they have not requested commits in the current task; when they say "commit", do it without further confirmation.
 - Never commit secrets (`.env`, keys, credentials). `.env.example` is fine.
 - Write commit messages that explain why, not just what changed.
+
+# Merge via pull requests
+
+- Do **not** push directly to `main` (or other protected default branches) for feature work.
+- Work on a branch, push with `-u origin HEAD`, and open a PR with `gh pr create`.
+- Merge through the PR after review — not by pushing straight to `main`.
+- Keep PRs small and focused when possible; match the repo's commit message style.
+- Only push to `main` when the user explicitly asks for a direct push or hotfix exception.
