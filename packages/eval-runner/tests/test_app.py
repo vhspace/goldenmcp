@@ -371,8 +371,7 @@ def test_eval_publish_integration(client):
     assert body["walrus_manifest_blob_id"]
     assert body["walrus_eval_blob_id"]
     assert body["manifest"]["attestation_id"] == "attest-test"
-    assert body["manifest"]["attestation_id"] == "attest-test"
-    assert body["manifest"]["attestation_tx_hash"] == "0xdead"
+    assert body["manifest"]["attestation"]["inference_id"] == "attest-test"
 
 
 def test_eval_publish_legacy_manifest_with_log_bytes(client, monkeypatch):
