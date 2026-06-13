@@ -40,6 +40,7 @@ class EvalResponse(BaseModel):
     manifest: dict[str, Any]
     walrus_manifest_blob_id: str
     walrus_eval_blob_id: str | None = None
+    walrus_index_blob_id: str | None = None
 
 
 app = FastAPI(title="GoldenMCP Eval Runner")
@@ -89,6 +90,7 @@ def run_eval(request: EvalRequest):
         manifest=result.manifest.to_public_dict(),
         walrus_manifest_blob_id=result.walrus_manifest_blob_id,
         walrus_eval_blob_id=result.walrus_eval_blob_id,
+        walrus_index_blob_id=result.walrus_index_blob_id,
     )
 
 

@@ -15,6 +15,30 @@ class WalrusError(Exception):
     """Walrus API error with verbose context."""
 
 
+def parse_upload_blob_id(result: dict[str, Any]) -> str | None:
+    """Extract blob ID from Walrus publisher PUT /v1/blobs JSON response."""
+    for key in ("blobId", "blob_id", "id"):
+        value = result.get(key)
+        if value:
+            return str(value)
+
+    newly_created = result.get("newlyCreated")
+    if isinstance(newly_created, dict):
+        blob_object = newly_created.get("blobObject")
+        if isinstance(blob_object, dict):
+            blob_id = blob_object.get("blobId") or blob_object.get("blob_id")
+            if blob_id:
+                return str(blob_id)
+
+    already_certified = result.get("alreadyCertified")
+    if isinstance(already_certified, dict):
+        blob_id = already_certified.get("blobId") or already_certified.get("blob_id")
+        if blob_id:
+            return str(blob_id)
+
+    return None
+
+
 class WalrusClient:
     def __init__(
         self,
@@ -24,8 +48,12 @@ class WalrusClient:
         epochs: int | None = None,
         timeout: float = 120.0,
     ):
-        self.publisher_url = (publisher_url or os.environ["WALRUS_PUBLISHER_URL"]).rstrip("/")
-        self.aggregator_url = (aggregator_url or os.environ["WALRUS_AGGREGATOR_URL"]).rstrip("/")
+        if publisher_url and aggregator_url:
+            self.publisher_url = publisher_url.rstrip("/")
+            self.aggregator_url = aggregator_url.rstrip("/")
+        else:
+            self.publisher_url = os.environ["WALRUS_PUBLISHER_URL"].rstrip("/")
+            self.aggregator_url = os.environ["WALRUS_AGGREGATOR_URL"].rstrip("/")
         self.epochs = epochs or int(os.environ.get("WALRUS_EPOCHS", "1"))
         self.timeout = timeout
         logger.info(
@@ -48,7 +76,7 @@ class WalrusClient:
                     f"Walrus upload failed: status={response.status_code} body={response.text}"
                 )
             result = response.json()
-            blob_id = result.get("blobId") or result.get("blob_id") or result.get("id")
+            blob_id = parse_upload_blob_id(result)
             if not blob_id:
                 raise WalrusError(f"Walrus upload response missing blob ID: {result}")
             logger.info("uploaded blob_id=%s", blob_id)
