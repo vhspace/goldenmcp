@@ -1,0 +1,16 @@
+{
+  "input": {
+    "id": "019ec2ce-ce8a-7d30-97aa-dc9013776626",
+    "status": "completed",
+    "model": "gemma4",
+    "output": "PASS. The composite score of 0.86 falls logically within the range of the component scores (0.70 to 0.92) and is reasonably consistent with a weighted average.",
+    "usage": { "prompt_tokens": 195, "completion_tokens": 865 },
+    "resources": [
+      {
+        "url": "upload://manifest.json",
+        "response_digest": "99fe5155d137d2f6dbac784cb33c7d3a42a51bd5da656477a6a016a3843e71b2"
+      }
+    ],
+    "completed_at": "2026-06-13T21:07:01.403248439Z"
+  }
+}

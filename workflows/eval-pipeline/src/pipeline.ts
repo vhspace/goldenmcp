@@ -36,6 +36,8 @@ const MINIMAL_SCORE_TRANSCRIPT = {
 
 export interface EvalRunPollResult {
   run_id: string;
+  mcp?: string;
+  capability?: string;
   status: string;
   manifest?: ScoreManifest;
   error?: string;
@@ -196,7 +198,7 @@ function requireHttpOk(
   return text(response);
 }
 
-function getEvalRunnerApiKey(runtime: Runtime<Config>): string {
+export function getEvalRunnerApiKey(runtime: Runtime<Config>): string {
   try {
     const secret = runtime.getSecret({ id: "EVAL_RUNNER_API_KEY" }).result();
     if (secret.value?.trim()) {
@@ -217,7 +219,7 @@ function getEvalRunnerApiKey(runtime: Runtime<Config>): string {
   );
 }
 
-function getCaiApiKey(runtime: Runtime<Config>): string | undefined {
+export function getCaiApiKey(runtime: Runtime<Config>): string | undefined {
   try {
     const secret = runtime.getSecret({ id: "CHAINLINK_CAI_API_KEY" }).result();
     if (secret.value?.trim()) {
@@ -335,7 +337,7 @@ export function pollEvalRunUntilPublished(
   finalizeEvalRunPollStatus(lastStatus, "published");
 }
 
-async function runEvalScore(
+export async function runEvalScore(
   runtime: Runtime<Config>,
   target: PipelineTarget,
   apiKey: string,
@@ -395,24 +397,35 @@ async function runEvalScore(
   return { run_id: accepted.run_id, manifest: polled.manifest! };
 }
 
-export async function caiAttest(
+export const CAI_MODEL = "gemma4";
+
+/** The verdict prompt sent to the CAI TEE for a score manifest. */
+export function caiReviewPrompt(): string {
+  return [
+    "You are reviewing a GoldenMCP eval score manifest produced for an MCP server.",
+    "Assess whether the scores in manifest.json are internally consistent and the composite is plausible.",
+    "Reply with a short verdict: state PASS or FAIL and one sentence of reasoning.",
+  ].join("\n");
+}
+
+/**
+ * Submit a score manifest to the CAI TEE for attestation and return the
+ * inference id. When `callbackUrl` is set, CAI POSTs `{input: <status>}` to it
+ * once on completion (the async path — the workflow does not poll). The CAI
+ * status has no run_id, so callers encode it in the callback URL query string.
+ */
+export function submitCaiInference(
   runtime: Runtime<Config>,
   manifest: ScoreManifest,
   caiApiKey: string,
-): Promise<CaiAttestation> {
-  const config = runtime.config;
-  const base = config.chainlinkCaiUrl.replace(/\/$/, "");
-  const manifestJson = JSON.stringify(manifest);
-  const manifestBase64 = bytesToBase64(new TextEncoder().encode(manifestJson));
-  const model = "gemma4";
+  callbackUrl?: string,
+): string {
+  const base = runtime.config.chainlinkCaiUrl.replace(/\/$/, "");
+  const manifestBase64 = bytesToBase64(new TextEncoder().encode(JSON.stringify(manifest)));
 
   const submitBody: Record<string, unknown> = {
-    model,
-    prompt: [
-      "You are reviewing a GoldenMCP eval score manifest produced for an MCP server.",
-      "Assess whether the scores in manifest.json are internally consistent and the composite is plausible.",
-      "Reply with a short verdict: state PASS or FAIL and one sentence of reasoning.",
-    ].join("\n"),
+    model: CAI_MODEL,
+    prompt: caiReviewPrompt(),
     resources: [
       {
         filename: "manifest.json",
@@ -421,15 +434,11 @@ export async function caiAttest(
       },
     ],
   };
-  // Best-effort async relay: CAI POSTs `{input: <status>}` to this URL once on
-  // completion. The status has no run_id, so we carry it in the query string;
-  // the eval-runner webhook reads it and keys the callback for /eval/publish.
-  const callbackBase = config.evalRunnerUrl.replace(/\/$/, "");
-  submitBody.cre_callback = {
-    url: `${callbackBase}/webhooks/cai?run_id=${encodeURIComponent(manifest.run_id)}`,
-  };
+  if (callbackUrl) {
+    submitBody.cre_callback = { url: callbackUrl };
+  }
 
-  runtime.log(`CAI POST /v1/inference model=gemma4 run_id=${manifest.run_id}`);
+  runtime.log(`CAI POST /v1/inference model=${CAI_MODEL} run_id=${manifest.run_id}`);
   const submitResponse = httpClient
     .sendRequest(runtime, {
       url: `${base}/v1/inference`,
@@ -450,8 +459,22 @@ export async function caiAttest(
     throw new Error(`CAI submit missing inference id: ${submitText}`);
   }
   runtime.log(`CAI inference queued id=${inferenceId}`);
+  return inferenceId;
+}
 
-  let lastStatus = submitParsed.status ?? "queued";
+export async function caiAttest(
+  runtime: Runtime<Config>,
+  manifest: ScoreManifest,
+  caiApiKey: string,
+): Promise<CaiAttestation> {
+  const config = runtime.config;
+  const base = config.chainlinkCaiUrl.replace(/\/$/, "");
+  const model = CAI_MODEL;
+
+  // Inline (poll) path: submit without a callback, then poll to completion.
+  const inferenceId = submitCaiInference(runtime, manifest, caiApiKey);
+
+  let lastStatus = "queued";
   for (let attempt = 1; attempt <= config.caiPollMaxAttempts; attempt++) {
     const pollResponse = httpClient
       .sendRequest(runtime, {
@@ -531,6 +554,83 @@ export async function publishToWalrus(
   };
 }
 
+/**
+ * Register a CAI inference_id -> run_id mapping with the eval-runner (handler A,
+ * right after submitting to CAI). The CRE HTTP trigger only receives the CAI
+ * status, so this mapping is how handler B recovers the run.
+ */
+export function registerCaiSubmitted(
+  runtime: Runtime<Config>,
+  inferenceId: string,
+  runId: string,
+  apiKey: string,
+): void {
+  const base = runtime.config.evalRunnerUrl.replace(/\/$/, "");
+  const response = httpClient
+    .sendRequest(runtime, {
+      url: `${base}/eval/cai-submitted`,
+      method: "POST",
+      body: encodeHttpBody(JSON.stringify({ inference_id: inferenceId, run_id: runId })),
+      headers: jsonAuthHeaders(apiKey),
+      timeout: CRE_HTTP_TIMEOUT,
+    })
+    .result();
+  requireHttpOk(response, `eval/cai-submitted inference_id=${inferenceId}`);
+  runtime.log(`registered inference_id=${inferenceId} -> run_id=${runId}`);
+}
+
+/**
+ * Publish by CAI inference_id (handler B). The eval-runner resolves run_id from
+ * the inference index, applies the attestation, uploads to Walrus, and returns
+ * the manifest + mcp/capability so the caller can do the Arc write.
+ */
+export function publishByInferenceId(
+  runtime: Runtime<Config>,
+  inferenceId: string,
+  apiKey: string,
+  attestation: CaiAttestation,
+): {
+  runId: string;
+  mcp: string;
+  capability: string;
+  manifest: ScoreManifest;
+  walrus_manifest_blob_id: string;
+  walrus_eval_blob_id: string;
+  walrus_index_blob_id?: string;
+} {
+  const base = runtime.config.evalRunnerUrl.replace(/\/$/, "");
+  const body = JSON.stringify({ inference_id: inferenceId, attestation });
+
+  runtime.log(`POST /eval/publish (by inference_id=${inferenceId})`);
+  const response = httpClient
+    .sendRequest(runtime, {
+      url: `${base}/eval/publish`,
+      method: "POST",
+      body: encodeHttpBody(body),
+      headers: jsonAuthHeaders(apiKey),
+      timeout: CRE_HTTP_TIMEOUT,
+    })
+    .result();
+  const bodyText = requireHttpOk(response, `eval/publish inference_id=${inferenceId}`, [200, 202]);
+  const accepted = JSON.parse(bodyText) as { run_id?: string; status?: string };
+  const runId = accepted.run_id;
+  if (!runId) {
+    throw new Error(`eval/publish did not resolve a run_id for inference_id=${inferenceId}`);
+  }
+  runtime.log(`eval/publish resolved inference_id=${inferenceId} -> run_id=${runId} status=${accepted.status ?? "?"}`);
+
+  const polled = pollEvalRunUntilPublished(runtime, runId, apiKey);
+  return {
+    runId,
+    mcp: polled.mcp ?? polled.manifest!.mcp,
+    capability: polled.capability ?? polled.manifest!.capability,
+    manifest: polled.manifest!,
+    walrus_manifest_blob_id: polled.walrus_manifest_blob_id!,
+    walrus_eval_blob_id: polled.walrus_eval_blob_id!,
+    walrus_index_blob_id: polled.walrus_index_blob_id,
+  };
+}
+
 function writeRegistryReport(
   runtime: Runtime<Config>,
   evmClient: EVMClient,
@@ -558,27 +658,63 @@ function writeRegistryReport(
   return txHash ? (txHash.startsWith("0x") ? txHash : `0x${txHash}`) : "";
 }
 
-export async function writeToArc(
+/** Resolve the Arc registry address + EVM client, or null when Arc writes are disabled. */
+function resolveArcClient(
+  runtime: Runtime<Config>,
+): { registryAddress: string; evmClient: EVMClient } | null {
+  const registryAddress = runtime.config.arcRegistryAddress?.trim();
+  if (!registryAddress) {
+    runtime.log("arcRegistryAddress empty — skipping Arc registry write");
+    return null;
+  }
+  return { registryAddress, evmClient: new EVMClient(resolveChainSelector(runtime.config)) };
+}
+
+/**
+ * Write the attestation to Arc (recordAttestation: inference_id + transcript_hash).
+ * Depends on NOTHING from Walrus, so handler B calls this first — the attestation
+ * lands on-chain without waiting on the Walrus upload.
+ */
+export async function writeAttestationToArc(
+  runtime: Runtime<Config>,
+  agentId: number,
+  attestation: CaiAttestation,
+): Promise<{ attestationRecordTxHash?: string }> {
+  const arc = resolveArcClient(runtime);
+  if (!arc || !attestation.inference_id?.trim()) return {};
+
+  const ZERO_BYTES32 = `0x${"0".repeat(64)}` as Hex;
+  const transcriptHash = (attestation.transcript_hash?.trim() || ZERO_BYTES32) as Hex;
+  runtime.log(`Arc recordAttestation agentId=${agentId} inference_id=${attestation.inference_id}`);
+  const recordData = encodeFunctionData({
+    abi: MCP_REGISTRY_ABI,
+    functionName: "recordAttestation",
+    args: [BigInt(agentId), attestation.inference_id.trim(), transcriptHash],
+  });
+  const attestationRecordTxHash = writeRegistryReport(
+    runtime,
+    arc.evmClient,
+    arc.registryAddress,
+    recordData,
+    "recordAttestation",
+  );
+  return { attestationRecordTxHash };
+}
+
+/** Write the capability score + Walrus blob pointer to Arc (updateCapabilityScore). */
+export async function writeScoreToArc(
   runtime: Runtime<Config>,
   agentId: number,
   capability: string,
   manifest: ScoreManifest,
   walrusBlobId: string,
-  attestation?: CaiAttestation,
-): Promise<{ scoreTxHash?: string; attestationRecordTxHash?: string }> {
-  const registryAddress = runtime.config.arcRegistryAddress?.trim();
-  if (!registryAddress) {
-    runtime.log("arcRegistryAddress empty — skipping Arc registry write");
-    return {};
-  }
-
-  const chainSelector = resolveChainSelector(runtime.config);
-  const evmClient = new EVMClient(chainSelector);
+): Promise<{ scoreTxHash?: string }> {
+  const arc = resolveArcClient(runtime);
+  if (!arc) return {};
 
   runtime.log(
-    `Arc write agentId=${agentId} capability=${capability} registry=${registryAddress} walrus=${walrusBlobId}`,
+    `Arc updateCapabilityScore agentId=${agentId} capability=${capability} walrus=${walrusBlobId}`,
   );
-
   const updateData = encodeFunctionData({
     abi: MCP_REGISTRY_ABI,
     functionName: "updateCapabilityScore",
@@ -593,33 +729,29 @@ export async function writeToArc(
       walrusBlobId,
     ],
   });
-
   const scoreTxHash = writeRegistryReport(
     runtime,
-    evmClient,
-    registryAddress,
+    arc.evmClient,
+    arc.registryAddress,
     updateData,
     "updateCapabilityScore",
   );
+  return { scoreTxHash };
+}
 
-  let attestationRecordTxHash: string | undefined;
-  if (attestation?.inference_id?.trim()) {
-    const ZERO_BYTES32 = `0x${"0".repeat(64)}` as Hex;
-    const transcriptHash = (attestation.transcript_hash?.trim() || ZERO_BYTES32) as Hex;
-    const recordData = encodeFunctionData({
-      abi: MCP_REGISTRY_ABI,
-      functionName: "recordAttestation",
-      args: [BigInt(agentId), attestation.inference_id.trim(), transcriptHash],
-    });
-    attestationRecordTxHash = writeRegistryReport(
-      runtime,
-      evmClient,
-      registryAddress,
-      recordData,
-      "recordAttestation",
-    );
-  }
-
+/** Combined score + attestation write (inline runPipeline fallback path). */
+export async function writeToArc(
+  runtime: Runtime<Config>,
+  agentId: number,
+  capability: string,
+  manifest: ScoreManifest,
+  walrusBlobId: string,
+  attestation?: CaiAttestation,
+): Promise<{ scoreTxHash?: string; attestationRecordTxHash?: string }> {
+  const { scoreTxHash } = await writeScoreToArc(runtime, agentId, capability, manifest, walrusBlobId);
+  const { attestationRecordTxHash } = attestation
+    ? await writeAttestationToArc(runtime, agentId, attestation)
+    : {};
   return { scoreTxHash, attestationRecordTxHash };
 }
 

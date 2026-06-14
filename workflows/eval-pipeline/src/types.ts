@@ -1,3 +1,9 @@
+/** An HTTP-trigger authorized signer key. Empty list ([]) accepts any sender in simulation. */
+export interface AuthorizedKey {
+  type?: string;
+  publicKey?: string;
+}
+
 export interface Config {
   schedule: string;
   evalRunnerUrl: string;
@@ -8,6 +14,14 @@ export interface Config {
   arcChainSelector: string;
   defaultAgentId: number;
   useScoreOnly: boolean;
+  /**
+   * When set, the cron handler submits CAI inference with this URL as the
+   * cre_callback target (the workflow's own HTTP trigger) and returns, instead
+   * of polling inline. The HTTP-trigger handler then publishes + writes to Arc.
+   */
+  creCallbackUrl?: string;
+  /** Authorized senders for the HTTP trigger; [] accepts any in simulation. */
+  authorizedKeys?: AuthorizedKey[];
   /** Busy-wait between poll attempts in cre workflow simulate (runtime.sleep traps). */
   pollBusyWait?: boolean;
   /** When set, cron/simulate only runs these `mcp/capability` pairs (required for useScoreOnly fixture). */
