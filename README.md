@@ -1,28 +1,39 @@
 # GoldenMCP
 
-Web3 MCP evaluation marketplace: standardized Inspect evals, Walrus-backed results, ENS identity, Chainlink attestation, and x402 discovery on Arc.
+> An onchain reputation layer for Web3 MCP servers. Evals score live MCPs on data accuracy / tool-path / token efficiency; results are attested by Chainlink Confidential AI, stored on Walrus, written to a registry on Arc, and made discoverable via ENS — queryable by agents for a USDC nanopayment.
 
-Evals run against live Web3 MCP servers, get scored on data accuracy / tool-path / token efficiency, and the results are published to Walrus, attested by Chainlink Confidential AI, and written onchain to an MCP registry on Arc. Agents then pay a small USDC micropayment (x402) to look up the best-scoring MCP for a capability.
+**Live demo:** https://goldenmcp-e9l6.vercel.app/demo · **Demo video:** _(coming soon)_ · **Registry on Arc:** [`0x8db0…20e3`](https://testnet.arcscan.app/address/0x8db02877046c8fA3c8c6Abb2565094Ca29E820e3)
 
 ## Bounties — find your code
+
+We're targeting: **Chainlink** (Best workflow with CRE + Best usage of Confidential AI Attester) · **Arc** (Best Agentic Economy with Circle Agent Stack) · **ENS** (Best Integration for AI Agents). **Walrus** is a supporting integration, not a bounty submission.
 
 Each bounty's integration lives in a small number of files. Links go straight to the relevant source on `main`.
 
 ### ENS — MCP discovery via ENSIP-25/26
 
-ENS names are the public identity for each scored MCP; text records point at Walrus eval blobs and the onchain registry, resolved live (no hard-coded names).
+**Submitting for:** Best ENS Integration for AI Agents.
+
+ENS is the identity and discovery layer for every scored MCP. Each MCP is a `child.parent.eth` subname under [`goldenmcp.eth`](https://sepolia.app.ens.domains/goldenmcp.eth) (Sepolia), and its **agent context, MCP endpoint, and Walrus eval-blob pointer are stored as text records** (`agent-context`, `agent-endpoint[mcp]`, `goldenmcp/eval-blob`, per ENSIP-25/26). We read each subname's **ENSv2 TTL expiry** (walking `.eth registry → getSubregistry → findExpiry`) and mark an MCP **stale** once its identity has lapsed — so a name with an expired registration is visibly out of date rather than silently trusted. Discovery is fully live: no hard-coded names or values.
+
+**On-chain (Sepolia):** ENSv2 `.eth` registry [`0xDEDB92913A25abE1f7BCDD85D8A344a43B398B67`](https://sepolia.etherscan.io/address/0xDEDB92913A25abE1f7BCDD85D8A344a43B398B67).
 
 | What | Code |
 |------|------|
 | ENS text-record resolver (`resolve_text`, `resolve_agent_context`, `resolve_eval_blob`, `resolve_mcp_endpoint`) | [`packages/identity/src/goldenmcp_identity/registry.py`](https://github.com/vhspace/goldenmcp/blob/main/packages/identity/src/goldenmcp_identity/registry.py) |
+| ENSv2 TTL expiry / staleness check (`resolveENS`, `ensSubnameExpiry`) | [`apps/web/src/lib/data.ts`](https://github.com/vhspace/goldenmcp/blob/main/apps/web/src/lib/data.ts) |
 | Registry SDK (`ens_name` field, register/lookup) | [`packages/identity/`](https://github.com/vhspace/goldenmcp/tree/main/packages/identity) |
 | Live ENS resolver UI | [`apps/web/src/app/ens/page.tsx`](https://github.com/vhspace/goldenmcp/blob/main/apps/web/src/app/ens/page.tsx) |
 
 ### Chainlink — CRE eval orchestration + Confidential AI attestation
 
-A Chainlink CRE workflow orchestrates the whole pipeline: it calls the eval-runner to score an MCP, submits the score manifest to Confidential AI (CAI) for attestation, publishes to Walrus, then writes the score + attestation onchain.
+**Submitting for:** Best workflow with CRE + Best usage of Confidential AI Attester.
 
-The attestation **is** the completed TEE inference — there is no synthetic tx hash. The pipeline records the CAI `inference_id` and the `bytes32` **transcript hash** (the enclave's `response_digest`, falling back to `sha256(output)`) on-chain via `recordAttestation`, mirroring Chainlink's official undercollateralized-loan example.
+A Chainlink CRE workflow orchestrates the whole pipeline: it calls the eval-runner to score an MCP, submits the score manifest to Confidential AI (CAI) for attestation, publishes to Walrus, then **writes the score + attestation onchain** via `updateCapabilityScore` + `recordAttestation` on the Arc registry. The CRE workflow drives a real onchain state change — it is the orchestration layer, not a frontend read.
+
+The attestation **is** the completed TEE inference — there is no synthetic tx hash. CAI processes the eval manifest (sensitive scoring data) inside the enclave; the pipeline records the CAI `inference_id` and the `bytes32` **transcript hash** (the enclave's `response_digest`, falling back to `sha256(output)`) onchain via `recordAttestation`, mirroring Chainlink's official undercollateralized-loan example.
+
+The CRE workflow's onchain target is the same Arc registry — [`recordAttestation` + `updateCapabilityScore` on `0x8db0…20e3`](https://testnet.arcscan.app/address/0x8db02877046c8fA3c8c6Abb2565094Ca29E820e3).
 
 | What | Code |
 |------|------|
@@ -34,7 +45,17 @@ The attestation **is** the completed TEE inference — there is no synthetic tx 
 
 ### Arc — x402 USDC nanopayments for MCP lookup
 
+**Submitting for:** Best Agentic Economy with Circle Agent Stack. GoldenMCP is a pay-per-query agent marketplace — agents pay gas-free USDC nanopayments on Arc to look up the best-scoring MCP for a capability, with no human in the loop.
+
 The marketplace MCP is x402-gated: lookups return HTTP 402 with a USDC price until a payment header is present. Scores are written to an ERC-8004-inspired registry deployed on Arc, where USDC is the native gas token.
+
+**On-chain (Arc testnet, chain `5042002`):**
+
+| Contract | Address |
+|----------|---------|
+| MCPRegistry | [`0x8db02877046c8fA3c8c6Abb2565094Ca29E820e3`](https://testnet.arcscan.app/address/0x8db02877046c8fA3c8c6Abb2565094Ca29E820e3) |
+| USDC (gas token) | [`0x3600000000000000000000000000000000000000`](https://testnet.arcscan.app/address/0x3600000000000000000000000000000000000000) |
+| x402 payee | [`0x1A067578b8d4f69eFB1B8b857c99d1b825E84e73`](https://testnet.arcscan.app/address/0x1A067578b8d4f69eFB1B8b857c99d1b825E84e73) |
 
 | What | Code |
 |------|------|
@@ -44,9 +65,9 @@ The marketplace MCP is x402-gated: lookups return HTTP 402 with a USDC price unt
 | x402 nanopayments seller + buyer (Circle Gateway, Arc) | [`packages/marketplace-mcp-ts/`](https://github.com/vhspace/goldenmcp/blob/main/packages/marketplace-mcp-ts/) |
 | CRE → Arc registry write (`writeToArc`) | [`workflows/eval-pipeline/src/pipeline.ts`](https://github.com/vhspace/goldenmcp/blob/main/workflows/eval-pipeline/src/pipeline.ts) |
 
-### Sui / Walrus — eval blob storage (not a bounty)
+### Walrus — decentralized eval-blob storage (supporting integration)
 
-Walrus is the Sui-native decentralized blob store. Every score manifest and raw Inspect `.eval` log is written to Walrus testnet via its publisher/aggregator HTTP API, and ENS + registry records point at the resulting `walrus://<blobId>`. Listed here for completeness even though Sui is not a bounty.
+Eval results need durable, verifiable, content-addressed storage that any agent can read without trusting our server — so the eval store is **Walrus**, the Sui-native decentralized blob store. Every score manifest and raw Inspect `.eval` log is written to Walrus testnet via its publisher/aggregator HTTP API, and the resulting `walrus://<blobId>` is what ENS text records and the Arc registry point at. Walrus does genuine work in the stack: it's the storage layer the onchain reputation and the demo viewer both resolve against.
 
 | What | Code |
 |------|------|

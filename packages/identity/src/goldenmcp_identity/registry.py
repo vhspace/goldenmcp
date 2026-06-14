@@ -66,6 +66,24 @@ REGISTRY_ABI = [
     {
         "inputs": [
             {"name": "agentId", "type": "uint256"},
+            {"name": "inferenceId", "type": "string"},
+            {"name": "transcriptHash", "type": "bytes32"},
+        ],
+        "name": "recordAttestation",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [{"name": "name", "type": "string"}],
+        "name": "nameToAgentId",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [
+            {"name": "agentId", "type": "uint256"},
             {"name": "capability", "type": "string"},
         ],
         "name": "getCapabilityScore",
@@ -240,6 +258,39 @@ class RegistryClient:
         if receipt.status != 1:
             raise RuntimeError(f"updateCapabilityScore failed: {tx_hash.hex()}")
         return tx_hash.hex()
+
+    def record_attestation(
+        self, agent_id: int, inference_id: str, transcript_hash: str
+    ) -> str:
+        """Write the CAI attestation reference on-chain (recordAttestation, kind=2).
+
+        transcript_hash must be a 0x-prefixed bytes32; an empty/falsey value is
+        stored as the zero hash (matches the workflow's ZERO_BYTES32 fallback).
+        """
+        account = self._account()
+        digest = (transcript_hash or "").strip()
+        if not digest:
+            digest = "0x" + "00" * 32
+        tx = self.contract.functions.recordAttestation(
+            agent_id, inference_id, Web3.to_bytes(hexstr=digest)
+        ).build_transaction(
+            {
+                "from": account.address,
+                "nonce": self.w3.eth.get_transaction_count(account.address),
+                "gas": 500000,
+                "chainId": self.w3.eth.chain_id,
+            }
+        )
+        signed = account.sign_transaction(tx)
+        tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+        receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+        if receipt.status != 1:
+            raise RuntimeError(f"recordAttestation failed: {tx_hash.hex()}")
+        return tx_hash.hex()
+
+    def get_agent_id(self, name: str) -> int:
+        """Resolve an MCP name to its onchain agent id (0 = unregistered)."""
+        return self.contract.functions.nameToAgentId(name).call()
 
     def get_record(self, agent_id: int) -> MCPRegistration:
         rec = self.contract.functions.getRecord(agent_id).call()
