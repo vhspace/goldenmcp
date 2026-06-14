@@ -6,11 +6,11 @@ import type {
   MarketplaceMcpResult,
   PipelineRunState,
   PipelineStepId,
-  X402PriceResult,
 } from "@/lib/pipeline";
 import {
   applyStepUpdate,
   createInitialPipelineState,
+  parseX402PriceStepDetail,
   setActiveStep,
 } from "@/lib/pipeline";
 
@@ -86,12 +86,10 @@ export async function runDemoPipeline(
 
   if (
     !(await runStep("x402_price", async () => {
-      const res = await fetchPipelineStep<{ price: X402PriceResult; execution: ExecutionResult }>(
-        "x402-price",
-        { intent },
-      );
-      execution = res.detail!.execution;
-      return { ...(res.detail!.price as unknown as Record<string, unknown>) };
+      const res = await fetchPipelineStep("x402-price", { intent });
+      const { price, execution: exec } = parseX402PriceStepDetail(res.detail);
+      execution = exec;
+      return price;
     }))
   ) {
     return state;

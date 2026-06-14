@@ -95,6 +95,32 @@ export function applyStepUpdate(
   };
 }
 
+/** True when every step is pending with no detail — fresh run (GH #82 acceptance). */
+export function isFreshPipelineState(state: PipelineRunState): boolean {
+  return (
+    state.failedStep === null &&
+    state.activeStep === null &&
+    state.steps.every((s) => s.status === "pending" && s.detail === null && s.error === null)
+  );
+}
+
+/** Parse x402-price API detail `{ price, execution }` for the client orchestrator. */
+export function parseX402PriceStepDetail(detail: unknown): {
+  price: Record<string, unknown>;
+  execution: ExecutionResult;
+} {
+  if (!detail || typeof detail !== "object") {
+    throw new Error("x402-price response missing detail object");
+  }
+  const body = detail as Record<string, unknown>;
+  const price = body.price;
+  const execution = body.execution;
+  if (!price || typeof price !== "object" || !execution || typeof execution !== "object") {
+    throw new Error("x402-price response must include price and execution");
+  }
+  return { price: price as Record<string, unknown>, execution: execution as ExecutionResult };
+}
+
 export interface MarketplaceCandidate {
   mcp: string;
   ensName: string;
