@@ -1,16 +1,14 @@
 import {
   CronCapability,
   HTTPCapability,
-  HTTPClient,
   handler,
-  ok,
   Runner,
-  text,
   type HTTPPayload,
   type Runtime,
 } from "@chainlink/cre-sdk";
 import { bytesToString } from "viem";
 import {
+  creHttp,
   fetchAgentId,
   fetchManifestByRunId,
   getCaiApiKey,
@@ -29,8 +27,6 @@ import {
   type CaiStatus,
 } from "./pipeline";
 import type { Config, PipelineTarget } from "./types";
-
-const httpClient = new HTTPClient();
 
 function benchmarkKey(mcp: string, capability: string): string {
   return `${mcp}/${capability}`;
@@ -109,16 +105,14 @@ function fetchNextBenchmark(runtime: Runtime<Config>): {
   index: number;
   total: number;
 } {
-  const resp = httpClient
-    .sendRequest(runtime, {
-      url: `${runtime.config.evalRunnerUrl.replace(/\/$/, "")}/benchmarks/next`,
-      method: "GET",
-    })
-    .result();
-  if (!ok(resp)) {
-    throw new Error(`GET /benchmarks/next failed: HTTP ${resp.statusCode} — ${text(resp)}`);
+  const resp = creHttp(runtime, {
+    url: `${runtime.config.evalRunnerUrl.replace(/\/$/, "")}/benchmarks/next`,
+    method: "GET",
+  });
+  if (resp.statusCode !== 200) {
+    throw new Error(`GET /benchmarks/next failed: HTTP ${resp.statusCode} — ${resp.bodyText}`);
   }
-  return JSON.parse(text(resp)) as { mcp: string; capability: string; index: number; total: number };
+  return JSON.parse(resp.bodyText) as { mcp: string; capability: string; index: number; total: number };
 }
 
 async function onCronTrigger(runtime: Runtime<Config>): Promise<string> {
@@ -151,20 +145,18 @@ async function onCronTrigger(runtime: Runtime<Config>): Promise<string> {
       },
     ];
   } else {
-    const benchmarksResponse = httpClient
-      .sendRequest(runtime, {
-        url: `${config.evalRunnerUrl.replace(/\/$/, "")}/benchmarks`,
-        method: "GET",
-      })
-      .result();
+    const benchmarksResponse = creHttp(runtime, {
+      url: `${config.evalRunnerUrl.replace(/\/$/, "")}/benchmarks`,
+      method: "GET",
+    });
 
-    if (!ok(benchmarksResponse)) {
+    if (benchmarksResponse.statusCode !== 200) {
       throw new Error(
-        `GET /benchmarks failed: HTTP ${benchmarksResponse.statusCode} — ${text(benchmarksResponse)}`,
+        `GET /benchmarks failed: HTTP ${benchmarksResponse.statusCode} — ${benchmarksResponse.bodyText}`,
       );
     }
 
-    const benchmarks = JSON.parse(text(benchmarksResponse)) as {
+    const benchmarks = JSON.parse(benchmarksResponse.bodyText) as {
       benchmarks?: Array<{ mcp: string; capability: string }>;
     };
     const allItems = benchmarks.benchmarks ?? [];
