@@ -512,7 +512,8 @@ export function submitCaiInference(
     timeout: CRE_HTTP_TIMEOUT,
   });
 
-  const submitText = requireHttpOk(submitResponse, "CAI /v1/inference submit");
+  // CAI returns 202 Accepted (queued) on submit, sometimes 200.
+  const submitText = requireHttpOk(submitResponse, "CAI /v1/inference submit", [200, 202]);
   const submitParsed = JSON.parse(submitText) as { id: string; status?: string };
   const inferenceId = submitParsed.id;
   if (!inferenceId) {
