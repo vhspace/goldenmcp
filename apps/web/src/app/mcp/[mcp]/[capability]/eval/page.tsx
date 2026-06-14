@@ -1,3 +1,4 @@
+import { headers } from "next/headers";
 import { fetchManifest, resolveEvalLogUrl, type ScoreManifest } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
@@ -30,10 +31,14 @@ export default async function EvalViewerPage({
   }
 
   // Same-origin proxy so the Inspect viewer can fetch the .eval without CORS
-  // and so walrus:// indexed paths resolve server-side.
-  const proxyLogUrl = `/api/eval-log?mcp=${encodeURIComponent(mcp)}&capability=${encodeURIComponent(
-    capability,
-  )}`;
+  // and so walrus:// indexed paths resolve server-side. Must be ABSOLUTE — the
+  // bundled viewer treats a relative log_file as relative to its own logs/ dir.
+  const h = await headers();
+  const proto = h.get("x-forwarded-proto") ?? "https";
+  const host = h.get("host") ?? "";
+  const proxyLogUrl = `${proto}://${host}/api/eval-log?mcp=${encodeURIComponent(
+    mcp,
+  )}&capability=${encodeURIComponent(capability)}`;
   const viewerSrc = `${inspectViewerBase()}?log_file=${encodeURIComponent(proxyLogUrl)}`;
 
   return (
