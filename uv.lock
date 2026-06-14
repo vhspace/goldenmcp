@@ -10,6 +10,7 @@ members = [
     "goldenmcp-inspect-web3",
     "goldenmcp-marketplace",
     "goldenmcp-walrus",
+    "goldenmcp-web-agent",
 ]
 
 [[package]]
@@ -653,6 +654,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "uvicorn" },
+    { name = "web3" },
 ]
 
 [package.metadata]
@@ -666,6 +668,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "uvicorn", specifier = ">=0.32" },
+    { name = "web3", specifier = ">=7.0" },
 ]
 
 [[package]]
@@ -758,6 +761,31 @@ requires-dist = [
     { name = "fsspec", specifier = ">=2024.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2.0" },
+]
+
+[[package]]
+name = "goldenmcp-web-agent"
+version = "0.1.0"
+source = { editable = "packages/web-agent" }
+dependencies = [
+    { name = "anthropic" },
+    { name = "fastapi" },
+    { name = "goldenmcp-inspect-web3" },
+    { name = "httpx" },
+    { name = "mcp" },
+    { name = "pydantic-settings" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anthropic", specifier = ">=0.40.0" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "goldenmcp-inspect-web3", editable = "packages/inspect-web3" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "mcp", specifier = ">=1.23.0" },
+    { name = "pydantic-settings", specifier = ">=2.0" },
+    { name = "uvicorn", specifier = ">=0.30" },
 ]
 
 [[package]]

@@ -96,7 +96,7 @@ class InferenceIndex:
 # submit both to one CAI judge that sums across models.
 ENSEMBLE_MODELS = (
     "together/Qwen/Qwen3.5-9B",
-    "together/google/gemma-4-31B-it",
+    "together/openai/gpt-oss-20b",
 )
 
 
@@ -109,7 +109,14 @@ class BenchmarkCursor:
     """
 
     def __init__(self, models: tuple[str, ...] = ENSEMBLE_MODELS) -> None:
-        self._index = 0
+        # GOLDENMCP_CURSOR_START lets an operator skip ahead in the rotation (e.g.
+        # past a rate-limited MCP). Best-effort int; defaults to 0.
+        import os
+
+        try:
+            self._index = max(0, int(os.environ.get("GOLDENMCP_CURSOR_START", "0")))
+        except ValueError:
+            self._index = 0
         self._models = models
 
     def next_pair(self, benchmarks: list[tuple[str, str]]) -> dict[str, object]:

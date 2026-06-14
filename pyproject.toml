@@ -12,6 +12,7 @@ members = [
     "packages/marketplace-mcp",
     "packages/identity",
     "packages/eval-runner",
+    "packages/web-agent",
 ]
 
 [dependency-groups]

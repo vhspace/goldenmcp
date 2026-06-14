@@ -1,16 +1,14 @@
 import {
   CronCapability,
   HTTPCapability,
-  HTTPClient,
   handler,
-  ok,
   Runner,
-  text,
   type HTTPPayload,
   type Runtime,
 } from "@chainlink/cre-sdk";
 import { bytesToString } from "viem";
 import {
+  creHttp,
   fetchAgentId,
   fetchManifestByRunId,
   getCaiApiKey,
@@ -29,8 +27,6 @@ import {
   type CaiStatus,
 } from "./pipeline";
 import type { Config, PipelineTarget } from "./types";
-
-const httpClient = new HTTPClient();
 
 function benchmarkKey(mcp: string, capability: string): string {
   return `${mcp}/${capability}`;
@@ -53,15 +49,15 @@ function filterBenchmarks(
  * the manifest to CAI with cre_callback = this workflow's HTTP trigger, and return.
  * CAI's completion POST starts a fresh HTTP-trigger execution (handler B).
  */
-async function submitForAttestation(
+function submitForAttestation(
   runtime: Runtime<Config>,
   target: PipelineTarget,
   model?: string,
   modelsTotal = 1,
-): Promise<string> {
+): string {
   const config = runtime.config;
   const evalRunnerApiKey = getEvalRunnerApiKey(runtime);
-  const scored = await runEvalScore(runtime, target, evalRunnerApiKey, model);
+  const scored = runEvalScore(runtime, target, evalRunnerApiKey, model);
 
   const caiApiKey = getCaiApiKey(runtime);
   if (!caiApiKey) {
@@ -109,21 +105,25 @@ function fetchNextBenchmark(runtime: Runtime<Config>): {
   index: number;
   total: number;
 } {
-  const resp = httpClient
-    .sendRequest(runtime, {
-      url: `${runtime.config.evalRunnerUrl.replace(/\/$/, "")}/benchmarks/next`,
-      method: "GET",
-    })
-    .result();
-  if (!ok(resp)) {
-    throw new Error(`GET /benchmarks/next failed: HTTP ${resp.statusCode} — ${text(resp)}`);
+  const resp = creHttp(runtime, {
+    url: `${runtime.config.evalRunnerUrl.replace(/\/$/, "")}/benchmarks/next`,
+    method: "GET",
+  });
+  if (resp.statusCode !== 200) {
+    throw new Error(`GET /benchmarks/next failed: HTTP ${resp.statusCode} — ${resp.bodyText}`);
   }
-  return JSON.parse(text(resp)) as { mcp: string; capability: string; index: number; total: number };
+  return JSON.parse(resp.bodyText) as { mcp: string; capability: string; index: number; total: number };
 }
 
-async function onCronTrigger(runtime: Runtime<Config>): Promise<string> {
+/**
+ * Handler A core: rotate to the next benchmark (or run the allowlist), score it,
+ * and submit for attestation. Shared by the cron trigger and the HTTP "run"
+ * trigger — the cron trigger hangs in `cre` simulate (a CLI/runtime bug, not our
+ * code: even a hello-world cron hangs while HTTP triggers run fine), so the demo
+ * fires this via the HTTP trigger instead. Both paths execute identical logic.
+ */
+function runEvalRotation(runtime: Runtime<Config>): string {
   const config = runtime.config;
-  runtime.log("GoldenMCP eval pipeline cron triggered");
 
   // Rotation mode: run exactly ONE benchmark per fire (eval-runner cursor),
   // cycling through all of them across successive fires. Keeps each execution
@@ -151,20 +151,18 @@ async function onCronTrigger(runtime: Runtime<Config>): Promise<string> {
       },
     ];
   } else {
-    const benchmarksResponse = httpClient
-      .sendRequest(runtime, {
-        url: `${config.evalRunnerUrl.replace(/\/$/, "")}/benchmarks`,
-        method: "GET",
-      })
-      .result();
+    const benchmarksResponse = creHttp(runtime, {
+      url: `${config.evalRunnerUrl.replace(/\/$/, "")}/benchmarks`,
+      method: "GET",
+    });
 
-    if (!ok(benchmarksResponse)) {
+    if (benchmarksResponse.statusCode !== 200) {
       throw new Error(
-        `GET /benchmarks failed: HTTP ${benchmarksResponse.statusCode} — ${text(benchmarksResponse)}`,
+        `GET /benchmarks failed: HTTP ${benchmarksResponse.statusCode} — ${benchmarksResponse.bodyText}`,
       );
     }
 
-    const benchmarks = JSON.parse(text(benchmarksResponse)) as {
+    const benchmarks = JSON.parse(benchmarksResponse.bodyText) as {
       benchmarks?: Array<{ mcp: string; capability: string }>;
     };
     const allItems = benchmarks.benchmarks ?? [];
@@ -198,14 +196,29 @@ async function onCronTrigger(runtime: Runtime<Config>): Promise<string> {
       agentId: bench.agentId && bench.agentId > 0 ? bench.agentId : config.defaultAgentId,
     };
     if (asyncMode) {
-      results.push(await submitForAttestation(runtime, target, bench.model, bench.modelsTotal ?? 1));
+      results.push(submitForAttestation(runtime, target, bench.model, bench.modelsTotal ?? 1));
     } else {
-      const result = await runPipeline(runtime, target);
+      const result = runPipeline(runtime, target);
       results.push(`${bench.mcp}/${bench.capability}:${result.manifest.composite}`);
     }
   }
 
   return `Pipeline ${asyncMode ? "submitted" : "complete"}: ${results.join(", ")}`;
+}
+
+/** Cron entry point (handler A). Note: the cron trigger currently hangs in `cre`
+ * simulate; use the HTTP "run" trigger (onRunTrigger) to drive the demo. */
+function onCronTrigger(runtime: Runtime<Config>): string {
+  runtime.log("GoldenMCP eval pipeline cron triggered");
+  return runEvalRotation(runtime);
+}
+
+/** HTTP entry point for handler A — fire one rotation step with `--http-payload`
+ * (the payload is ignored; it only starts the execution). Used because the cron
+ * trigger hangs in the simulator. */
+function onRunTrigger(runtime: Runtime<Config>, _payload: HTTPPayload): string {
+  runtime.log("GoldenMCP eval pipeline HTTP-run triggered");
+  return runEvalRotation(runtime);
 }
 
 /**
@@ -215,10 +228,10 @@ async function onCronTrigger(runtime: Runtime<Config>): Promise<string> {
  * holds the inference_id -> run_id map), publish to Walrus, and write to Arc.
  * This is a fresh execution started by the callback.
  */
-async function onAttestationCallback(
+function onAttestationCallback(
   runtime: Runtime<Config>,
   payload: HTTPPayload,
-): Promise<string> {
+): string {
   const config = runtime.config;
   const wrapper = JSON.parse(bytesToString(payload.input)) as { input?: CaiStatus } & CaiStatus;
   // CAI wraps the status as {"input": <status>}; tolerate a bare status too.
@@ -247,10 +260,10 @@ async function onAttestationCallback(
   runtime.log(`handler B writing to agentId=${agentId} (mcp=${published.mcp})`);
 
   // 2) Record the attestation on-chain (inference id + transcript hash).
-  const { attestationRecordTxHash } = await writeAttestationToArc(runtime, agentId, attestation);
+  const { attestationRecordTxHash } = writeAttestationToArc(runtime, agentId, attestation);
 
   // 3) Write the score row with the Walrus blob pointer.
-  const { scoreTxHash } = await writeScoreToArc(
+  const { scoreTxHash } = writeScoreToArc(
     runtime,
     agentId,
     published.capability,
@@ -273,9 +286,14 @@ async function onAttestationCallback(
 const initWorkflow = (config: Config) => {
   const cron = new CronCapability();
   const http = new HTTPCapability();
+  // Trigger order is the index used by `cre workflow simulate --trigger-index N`:
+  //   0 = cron (handler A) — currently hangs in `cre` simulate; kept for prod.
+  //   1 = HTTP CAI callback (handler B) — the droplet listener uses --trigger-index 1.
+  //   2 = HTTP "run" (handler A) — fire with --http-payload to drive the demo.
   return [
     handler(cron.trigger({ schedule: config.schedule }), onCronTrigger),
     handler(http.trigger({ authorizedKeys: config.authorizedKeys ?? [] }), onAttestationCallback),
+    handler(http.trigger({ authorizedKeys: config.authorizedKeys ?? [] }), onRunTrigger),
   ];
 };
 

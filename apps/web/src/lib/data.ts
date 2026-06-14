@@ -1,7 +1,6 @@
 import { createPublicClient, http, parseAbi } from "viem";
 import {
   aggregateVendorProfiles,
-  extractLatencyMsFromEvalLog,
   type LeaderboardEntry,
   type VendorProfile,
 } from "@/lib/vendors";
@@ -99,6 +98,8 @@ export interface ScoreManifest {
   composite?: number;
   walrus_blob_id?: string | null;
   walrus_manifest_blob_id?: string | null;
+  walrus_index_blob_id?: string | null;
+  latency_ms?: number | null;
   attestation?: Record<string, unknown> | null;
   attestation_id?: string | null;
   [key: string]: unknown;
@@ -111,18 +112,71 @@ export async function fetchManifest(mcp: string, capability: string): Promise<Sc
   return fetchWalrusJson(entry.walrusBlobId);
 }
 
-async function fetchWalrusJson(blobId: string): Promise<Record<string, unknown>> {
+function walrusAggregator(): string {
   const aggregator = firstEnv("NEXT_PUBLIC_WALRUS_AGGREGATOR_URL", "WALRUS_AGGREGATOR_URL");
   if (!aggregator) {
     throw new Error(
       "NEXT_PUBLIC_WALRUS_AGGREGATOR_URL is not set (also tried WALRUS_AGGREGATOR_URL)",
     );
   }
-  const res = await fetch(`${aggregator}/v1/blobs/${blobId}`);
+  return aggregator.replace(/\/$/, "");
+}
+
+async function fetchWalrusJson(blobId: string): Promise<Record<string, unknown>> {
+  const res = await fetch(`${walrusAggregator()}/v1/blobs/${blobId}`);
   if (!res.ok) {
     throw new Error(`Walrus fetch failed for blob ${blobId}: HTTP ${res.status} ${await res.text()}`);
   }
   return res.json();
+}
+
+/**
+ * Resolve the actual Inspect `.eval` log to a concrete Walrus blob URL.
+ *
+ * The manifest's `walrus_blob_id` points at the eval log in one of two forms
+ * (see packages/inspect-web3 pipeline.py):
+ *   1. a direct Walrus blob id (no slashes) — fetchable at /v1/blobs/{id}; or
+ *   2. an indexed logical path `walrus://evals/goldenmcp/..._run.eval` that
+ *      must be resolved through the WalrusFileSystem index blob.
+ *
+ * For case (2) we resolve the logical path through the WalrusFileSystem index.
+ * The index blob id comes from the manifest's own `walrus_index_blob_id` (each
+ * manifest self-resolves its eval path), falling back to the WALRUS_INDEX_BLOB_ID
+ * env var for older manifests that predate that field. Returns the aggregator HTTP
+ * URL for the raw `.eval` bytes, or throws with an actionable message.
+ */
+export async function resolveEvalLogUrl(manifest: ScoreManifest): Promise<string> {
+  const ref = manifest.walrus_blob_id;
+  if (typeof ref !== "string" || !ref.trim()) {
+    throw new Error("manifest has no walrus_blob_id (no eval log reference)");
+  }
+  const aggregator = walrusAggregator();
+
+  // Case 1: direct blob id (single path segment, no scheme/slashes).
+  if (!ref.startsWith("walrus://") && !ref.includes("/")) {
+    return `${aggregator}/v1/blobs/${ref}`;
+  }
+
+  // Case 2: walrus:// indexed logical path -> resolve via the index blob.
+  // Prefer the manifest-embedded index id; fall back to env for legacy manifests.
+  const indexBlobId =
+    (typeof manifest.walrus_index_blob_id === "string" && manifest.walrus_index_blob_id.trim()) ||
+    firstEnv("WALRUS_INDEX_BLOB_ID", "NEXT_PUBLIC_WALRUS_INDEX_BLOB_ID");
+  if (!indexBlobId) {
+    throw new Error(
+      `eval log is at indexed path "${ref}" but no index blob id available — ` +
+        "manifest has no walrus_index_blob_id and WALRUS_INDEX_BLOB_ID is unset",
+    );
+  }
+  const logical = ref.replace(/^walrus:\/\//, "").replace(/^\/+/, "").replace(/\/+$/, "");
+  const index = (await fetchWalrusJson(indexBlobId)) as {
+    files?: Record<string, { blob_id?: string }>;
+  };
+  const entry = index.files?.[logical];
+  if (!entry?.blob_id) {
+    throw new Error(`Walrus index has no entry for "${logical}" (index blob ${indexBlobId})`);
+  }
+  return `${aggregator}/v1/blobs/${entry.blob_id}`;
 }
 
 export async function fetchVendorProfiles(): Promise<VendorProfile[]> {
@@ -147,27 +201,13 @@ export async function fetchVendorProfiles(): Promise<VendorProfile[]> {
         } catch (err) {
           profile.ensError = err instanceof Error ? err.message : String(err);
         }
-      }
-
-      try {
-        const manifest = await fetchManifest(profile.mcp, profile.primaryCapability);
-        const evalRef = manifest.walrus_blob_id;
-        if (typeof evalRef !== "string" || !evalRef.trim()) {
-          profile.latencyError = "manifest has no walrus_blob_id for eval log";
-          return;
+        // TTL freshness: an expired ENSv2 subname identity has lapsed since its
+        // last eval (0 = never registered → not marked stale, just unregistered).
+        const expiry = await ensSubnameExpiry(profile.vendorName);
+        if (expiry !== null && expiry > 0) {
+          profile.ensExpiry = expiry;
+          profile.ensStale = expiry <= Math.floor(Date.now() / 1000);
         }
-        if (evalRef.startsWith("walrus://")) {
-          profile.latencyError =
-            "eval log stored at walrus:// indexed path — open Inspect View for full timing";
-          return;
-        }
-        const evalLog = await fetchWalrusJson(evalRef);
-        profile.latencyMs = extractLatencyMsFromEvalLog(evalLog);
-        if (profile.latencyMs === null) {
-          profile.latencyError = "eval log has no timing stats (stats.total_time missing)";
-        }
-      } catch (err) {
-        profile.latencyError = err instanceof Error ? err.message : String(err);
       }
     }),
   );
@@ -196,4 +236,47 @@ export async function resolveENS(name: string) {
     if (value) result[key] = value;
   }
   return result;
+}
+
+// Sepolia ENSv2 .eth registry — walked to find a parent's subregistry.
+const V2_ETH_REGISTRY =
+  process.env.NEXT_PUBLIC_ENS_V2_REGISTRY ?? "0xDEDB92913A25abE1f7BCDD85D8A344a43B398B67";
+
+/**
+ * Read an ENSv2 subname's TTL expiry by walking the registry hierarchy:
+ * .eth registry → getSubregistry(parentLabel) → findExpiry(childLabel).
+ * Returns the unix-seconds expiry, or null if the name isn't a 3-label
+ * `child.parent.eth` or has no subregistry. expiry === 0 means never registered.
+ */
+export async function ensSubnameExpiry(name: string): Promise<number | null> {
+  const rpc = firstEnv("NEXT_PUBLIC_ENS_RPC_URL", "ENS_RPC_URL");
+  if (!rpc) return null;
+  const labels = name.split(".");
+  if (labels.length !== 3 || labels[2] !== "eth") return null;
+  const [childLabel, parentLabel] = labels;
+  const { createPublicClient, http } = await import("viem");
+  const { sepolia } = await import("viem/chains");
+  const client = createPublicClient({ chain: sepolia, transport: http(rpc) });
+  const abi = parseAbi([
+    "function getSubregistry(string label) view returns (address)",
+    "function findExpiry(string label) view returns (uint64)",
+  ]);
+  try {
+    const subregistry = (await client.readContract({
+      address: V2_ETH_REGISTRY as `0x${string}`,
+      abi,
+      functionName: "getSubregistry",
+      args: [parentLabel],
+    })) as `0x${string}`;
+    if (BigInt(subregistry) === 0n) return null;
+    const expiry = (await client.readContract({
+      address: subregistry,
+      abi,
+      functionName: "findExpiry",
+      args: [childLabel],
+    })) as bigint;
+    return Number(expiry);
+  } catch {
+    return null;
+  }
 }

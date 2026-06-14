@@ -138,6 +138,11 @@ def _generate_config() -> GenerateConfig:
     # on an env var the runner sets only for the Qwen invocation.
     if os.environ.get("GOLDENMCP_DISABLE_THINKING") == "1":
         cfg.extra_body = {"chat_template_kwargs": {"enable_thinking": False}}
+    # gpt-oss exposes a reasoning_effort knob; "low" keeps the eval fast (fewer
+    # tokens -> fewer inspect polls, under the CRE HTTP-call cap). Runner-gated.
+    effort = os.environ.get("GOLDENMCP_REASONING_EFFORT", "")
+    if effort:
+        cfg.reasoning_effort = effort
     return cfg
 
 

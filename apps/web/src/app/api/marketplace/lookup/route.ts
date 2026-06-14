@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server";
+import { evalRunnerUrl, marketplaceUrl } from "@/lib/web-env";
 
 export async function POST(request: Request) {
-  const marketplaceUrl =
-    process.env.MARKETPLACE_URL ??
-    process.env.NEXT_PUBLIC_MARKETPLACE_URL ??
-    "http://localhost:8091";
-
   let body: { capability?: string; min_score?: number };
   try {
     body = await request.json();
@@ -23,12 +19,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "min_score must be a number between 0 and 1" }, { status: 400 });
   }
 
-  const evalRunnerUrl =
-    process.env.EVAL_RUNNER_URL ??
-    `http://${process.env.EVAL_RUNNER_HOST ?? "127.0.0.1"}:${process.env.EVAL_RUNNER_PORT ?? "8090"}`;
+  const runnerUrl = evalRunnerUrl();
+  const marketUrl = marketplaceUrl();
 
   try {
-    const healthRes = await fetch(`${evalRunnerUrl.replace(/\/$/, "")}/health`, {
+    const healthRes = await fetch(`${runnerUrl}/health`, {
       signal: AbortSignal.timeout(5000),
     });
     if (!healthRes.ok) {
@@ -43,13 +38,13 @@ export async function POST(request: Request) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
       {
-        error: `eval-runner unreachable at ${evalRunnerUrl} — ${msg}. Start: uv run python -m goldenmcp_eval_runner`,
+        error: `eval-runner unreachable at ${runnerUrl} — ${msg}. Set EVAL_RUNNER_PUBLIC_URL on Vercel.`,
       },
       { status: 502 },
     );
   }
 
-  const lookupUrl = `${marketplaceUrl.replace(/\/$/, "")}/tools/lookup`;
+  const lookupUrl = `${marketUrl}/tools/lookup`;
 
   try {
     const lookupRes = await fetch(lookupUrl, {
@@ -80,7 +75,7 @@ export async function POST(request: Request) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
       {
-        error: `Marketplace unreachable at ${lookupUrl} — ${msg}. Start: (cd packages/marketplace-mcp-ts && bun src/server.ts)`,
+        error: `Marketplace unreachable at ${lookupUrl} — ${msg}. Set MARKETPLACE_URL on Vercel.`,
       },
       { status: 502 },
     );

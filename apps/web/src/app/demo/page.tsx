@@ -2,7 +2,7 @@ import { fetchVendorProfiles } from "@/lib/data";
 import { DemoDashboardLayout } from "@/components/demo/DemoDashboardLayout";
 import { VendorMarketplaceTable } from "@/components/demo/VendorMarketplaceTable";
 import styles from "@/components/demo/demo-dashboard.module.css";
-import { ExecutionSandbox } from "@/components/ExecutionSandbox";
+import { ChatConcierge } from "@/components/ChatConcierge";
 import { GOLDEN_SCORE_THRESHOLDS, METER_THRESHOLDS, type VendorProfile } from "@/lib/vendors";
 
 export const dynamic = "force-dynamic";
@@ -51,9 +51,15 @@ export default async function DemoPage() {
 
   return (
     <DemoDashboardLayout rightRail={<DemoRightRail />}>
-      <ExecutionSandbox />
+      <section id="concierge">
+        <h2 className={styles.panelTitle}>GoldenMCP Concierge</h2>
+        <p className={styles.panelSub}>
+          Natural-language MCP discovery — paid marketplace lookup via x402 USDC on Arc.
+        </p>
+        <ChatConcierge embedded />
+      </section>
 
-      <section id="vendors" style={{ marginTop: "1rem" }}>
+      <section id="vendors" style={{ marginTop: "1.5rem" }}>
         <h2 className={styles.panelTitle}>Global Overview — MCP Vendors</h2>
         <p className={styles.panelSub}>
           Ranked by Golden Score from live Arc registry reads and Walrus eval manifests.

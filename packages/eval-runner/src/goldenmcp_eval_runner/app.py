@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 import subprocess
 import sys
 import threading
@@ -274,6 +275,16 @@ def _run_inspect_job(run_id: str, request: InspectEvalRequest, settings: RunnerS
         "--time-limit",
         str(settings.eval_inspect_time_limit),
     ]
+    # Per-model generation tweaks, read by tasks._generate_config in the subprocess:
+    #  - Qwen: disable thinking (chat_template_kwargs) so it answers without a
+    #    long reasoning preamble.
+    #  - gpt-oss: reasoning_effort=low to keep the eval fast (fewer tokens -> fewer
+    #    inspect polls, under the CRE HTTP-call cap).
+    sub_env = dict(os.environ)
+    if "qwen" in model.lower():
+        sub_env["GOLDENMCP_DISABLE_THINKING"] = "1"
+    if "gpt-oss" in model.lower():
+        sub_env["GOLDENMCP_REASONING_EFFORT"] = "low"
     try:
         proc = subprocess.run(
             cmd,
@@ -281,6 +292,7 @@ def _run_inspect_job(run_id: str, request: InspectEvalRequest, settings: RunnerS
             capture_output=True,
             text=True,
             timeout=settings.eval_inspect_timeout,
+            env=sub_env,
         )
     except subprocess.TimeoutExpired:
         logger.error(
@@ -322,6 +334,12 @@ def _run_inspect_job(run_id: str, request: InspectEvalRequest, settings: RunnerS
 
     transcript = transcript_from_inspect_log(log_data, request.mcp, request.capability)
     manifest = score_transcript_to_manifest(transcript, run_id=run_id)
+    # Embed wall-clock latency from the Inspect log so the frontend doesn't have
+    # to unzip the zstd .eval to read stats.total_time.
+    stats = log_data.get("stats") if isinstance(log_data, dict) else None
+    total_time = stats.get("total_time") if isinstance(stats, dict) else None
+    if isinstance(total_time, (int, float)) and total_time > 0:
+        manifest.latency_ms = round(total_time * 1000)
     eval_jobs.update(
         run_id,
         status=JobStatus.SCORED,

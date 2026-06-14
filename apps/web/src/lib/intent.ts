@@ -16,19 +16,19 @@ export interface DemoPrompt {
   text: string;
 }
 
-/** Pre-baked judge prompts — parsing derives fields from `text`, not from this metadata. */
-export const DEMO_PROMPTS: DemoPrompt[] = [
+/** Concierge chat quick prompts — quote flows that work today (registry has quote capability only). */
+export const CHAT_DEMO_PROMPTS: DemoPrompt[] = [
   {
-    id: "portfolio-swap",
-    text: "Optimize portfolio: Swap $100 USDC for GHO at the absolute lowest execution time.",
+    id: "eth-lifi-quote",
+    text: "Quote 0.001 ETH to USDC on Base using LI.FI get-quote. Skip marketplace lookup — call the vendor tool directly.",
   },
   {
-    id: "eth-quote",
-    text: "Get best ETH/USDC quote with min reliability ≥ 0.85",
+    id: "marketplace-quote",
+    text: "Find the best quote MCP for ETH/USDC with min reliability 0.15, then quote 0.001 ETH to USDC on Base via LI.FI.",
   },
   {
-    id: "dai-route",
-    text: "Route 500 DAI to USDC on L2 with reliability at least 0.92",
+    id: "probe-lifi",
+    text: "Smoke test: probe_vendor_mcp for lifi only. No marketplace tools.",
   },
 ];
 

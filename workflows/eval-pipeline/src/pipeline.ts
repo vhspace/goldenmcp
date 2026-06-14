@@ -1,9 +1,9 @@
 import {
+  consensusIdenticalAggregation,
   EVMClient,
   HTTPClient,
-  ok,
+  type HTTPSendRequester,
   prepareReportRequest,
-  text,
   TxStatus,
   type Runtime,
 } from "@chainlink/cre-sdk";
@@ -178,6 +178,55 @@ function encodeHttpBody(payload: string): string {
   return bytesToBase64(new TextEncoder().encode(payload));
 }
 
+interface CreHttpRequest {
+  url: string;
+  method?: string;
+  body?: string;
+  headers?: Record<string, string>;
+  timeout?: string;
+}
+
+interface CreHttpResult {
+  statusCode: number;
+  bodyText: string;
+}
+
+/**
+ * Make an outbound HTTP request from a CRE workflow.
+ *
+ * The HTTP capability runs in NODE mode: `sendRequest(runtime, fn, aggregation)`
+ * wraps `runtime.runInNodeMode((nodeRuntime) => fn(new SendRequester(...)))`, and
+ * each node's result is aggregated by consensus. Calling the raw
+ * `sendRequest(runtime, {request}).result()` shape with the DON runtime never
+ * dispatches a node-mode execution, so `.result()` blocks forever.
+ *
+ * Our eval-runner / CAI responses are deterministic, so we collapse the response
+ * to a primitive-shaped {statusCode, bodyText} and aggregate it as identical.
+ */
+export function creHttp(runtime: Runtime<Config>, req: CreHttpRequest): CreHttpResult {
+  return httpClient
+    .sendRequest(
+      runtime,
+      (sender: HTTPSendRequester): CreHttpResult => {
+        const resp = sender
+          .sendRequest({
+            url: req.url,
+            method: req.method ?? "GET",
+            ...(req.body !== undefined ? { body: req.body } : {}),
+            ...(req.headers ? { headers: req.headers } : {}),
+            ...(req.timeout ? { timeout: req.timeout } : {}),
+          })
+          .result();
+        return {
+          statusCode: resp.statusCode,
+          bodyText: resp.body ? new TextDecoder().decode(resp.body) : "",
+        };
+      },
+      consensusIdenticalAggregation<CreHttpResult>(),
+    )()
+    .result();
+}
+
 export function requireCaiAttestationFields(attestation: CaiAttestation): CaiAttestation {
   if (!attestation.inference_id?.trim()) {
     throw new Error("CAI inference completed but response contained no inference id");
@@ -186,16 +235,16 @@ export function requireCaiAttestationFields(attestation: CaiAttestation): CaiAtt
 }
 
 function requireHttpOk(
-  response: ReturnType<ReturnType<HTTPClient["sendRequest"]>["result"]>,
+  response: CreHttpResult,
   context: string,
   allowedStatuses: number[] = [200],
 ): string {
-  if (!ok(response) || !allowedStatuses.includes(response.statusCode)) {
-    const body = text(response);
+  if (!allowedStatuses.includes(response.statusCode)) {
+    const body = response.bodyText;
     const snippet = body.length > 500 ? `${body.slice(0, 500)}…` : body;
     throw new Error(`${context}: HTTP ${response.statusCode} — ${snippet}`);
   }
-  return text(response);
+  return response.bodyText;
 }
 
 export function getEvalRunnerApiKey(runtime: Runtime<Config>): string {
@@ -259,14 +308,12 @@ export function pollEvalRunUntilScored(
   let lastStatus = "queued";
 
   for (let attempt = 1; attempt <= config.inspectPollMaxAttempts; attempt++) {
-    const pollResponse = httpClient
-      .sendRequest(runtime, {
-        url: `${base}/eval/runs/${encodeURIComponent(runId)}`,
-        method: "GET",
-        headers: authHeaders(apiKey),
-        timeout: CRE_HTTP_TIMEOUT,
-      })
-      .result();
+    const pollResponse = creHttp(runtime, {
+      url: `${base}/eval/runs/${encodeURIComponent(runId)}`,
+      method: "GET",
+      headers: authHeaders(apiKey),
+      timeout: CRE_HTTP_TIMEOUT,
+    });
     const pollText = requireHttpOk(pollResponse, `eval/runs/${runId} attempt ${attempt}`);
     const pollParsed = parseEvalRunPoll(pollText);
     lastStatus = pollParsed.status;
@@ -303,14 +350,12 @@ export function pollEvalRunUntilPublished(
   let lastStatus = "publishing";
 
   for (let attempt = 1; attempt <= config.publishPollMaxAttempts; attempt++) {
-    const pollResponse = httpClient
-      .sendRequest(runtime, {
-        url: `${base}/eval/runs/${encodeURIComponent(runId)}`,
-        method: "GET",
-        headers: authHeaders(apiKey),
-        timeout: CRE_HTTP_TIMEOUT,
-      })
-      .result();
+    const pollResponse = creHttp(runtime, {
+      url: `${base}/eval/runs/${encodeURIComponent(runId)}`,
+      method: "GET",
+      headers: authHeaders(apiKey),
+      timeout: CRE_HTTP_TIMEOUT,
+    });
     const pollText = requireHttpOk(pollResponse, `eval/runs/${runId} attempt ${attempt}`);
     const pollParsed = parseEvalRunPoll(pollText);
     lastStatus = pollParsed.status;
@@ -337,12 +382,12 @@ export function pollEvalRunUntilPublished(
   finalizeEvalRunPollStatus(lastStatus, "published");
 }
 
-export async function runEvalScore(
+export function runEvalScore(
   runtime: Runtime<Config>,
   target: PipelineTarget,
   apiKey: string,
   model?: string,
-): Promise<{ run_id: string; manifest: ScoreManifest }> {
+): { run_id: string; manifest: ScoreManifest } {
   const config = runtime.config;
   const base = config.evalRunnerUrl.replace(/\/$/, "");
 
@@ -355,15 +400,13 @@ export async function runEvalScore(
       capability: target.capability,
       transcript: MINIMAL_SCORE_TRANSCRIPT,
     });
-    const response = httpClient
-      .sendRequest(runtime, {
-        url: `${base}/eval/score`,
-        method: "POST",
-        body: encodeHttpBody(body),
-        headers: jsonAuthHeaders(apiKey),
-        timeout: CRE_HTTP_TIMEOUT,
-      })
-      .result();
+    const response = creHttp(runtime, {
+      url: `${base}/eval/score`,
+      method: "POST",
+      body: encodeHttpBody(body),
+      headers: jsonAuthHeaders(apiKey),
+      timeout: CRE_HTTP_TIMEOUT,
+    });
     const bodyText = requireHttpOk(response, `eval/score ${target.mcp}/${target.capability}`);
     const parsed = JSON.parse(bodyText) as { run_id: string; manifest: ScoreManifest };
     runtime.log(`eval/score run_id=${parsed.run_id} composite=${parsed.manifest.composite}`);
@@ -378,15 +421,13 @@ export async function runEvalScore(
       ? { mcp: target.mcp, capability: target.capability, model }
       : { mcp: target.mcp, capability: target.capability },
   );
-  const response = httpClient
-    .sendRequest(runtime, {
-      url: `${base}/eval/inspect`,
-      method: "POST",
-      body: encodeHttpBody(inspectBody),
-      headers: jsonAuthHeaders(apiKey),
-      timeout: CRE_HTTP_TIMEOUT,
-    })
-    .result();
+  const response = creHttp(runtime, {
+    url: `${base}/eval/inspect`,
+    method: "POST",
+    body: encodeHttpBody(inspectBody),
+    headers: jsonAuthHeaders(apiKey),
+    timeout: CRE_HTTP_TIMEOUT,
+  });
   const bodyText = requireHttpOk(response, `eval/inspect ${target.mcp}/${target.capability}`, [200, 202]);
   const accepted = JSON.parse(bodyText) as { run_id: string; status: string };
   if (!accepted.run_id) {
@@ -460,20 +501,19 @@ export function submitCaiInference(
   runtime.log(
     `CAI POST /v1/inference model=${CAI_MODEL} run_id=${manifests[0].run_id} manifests=${manifests.length}`,
   );
-  const submitResponse = httpClient
-    .sendRequest(runtime, {
-      url: `${base}/v1/inference`,
-      method: "POST",
-      body: encodeHttpBody(JSON.stringify(submitBody)),
-      headers: {
-        ...authHeaders(caiApiKey),
-        "Content-Type": "application/json",
-      },
-      timeout: CRE_HTTP_TIMEOUT,
-    })
-    .result();
+  const submitResponse = creHttp(runtime, {
+    url: `${base}/v1/inference`,
+    method: "POST",
+    body: encodeHttpBody(JSON.stringify(submitBody)),
+    headers: {
+      ...authHeaders(caiApiKey),
+      "Content-Type": "application/json",
+    },
+    timeout: CRE_HTTP_TIMEOUT,
+  });
 
-  const submitText = requireHttpOk(submitResponse, "CAI /v1/inference submit");
+  // CAI returns 202 Accepted (queued) on submit, sometimes 200.
+  const submitText = requireHttpOk(submitResponse, "CAI /v1/inference submit", [200, 202]);
   const submitParsed = JSON.parse(submitText) as { id: string; status?: string };
   const inferenceId = submitParsed.id;
   if (!inferenceId) {
@@ -483,11 +523,11 @@ export function submitCaiInference(
   return inferenceId;
 }
 
-export async function caiAttest(
+export function caiAttest(
   runtime: Runtime<Config>,
   manifest: ScoreManifest,
   caiApiKey: string,
-): Promise<CaiAttestation> {
+): CaiAttestation {
   const config = runtime.config;
   const base = config.chainlinkCaiUrl.replace(/\/$/, "");
   const model = CAI_MODEL;
@@ -497,14 +537,12 @@ export async function caiAttest(
 
   let lastStatus = "queued";
   for (let attempt = 1; attempt <= config.caiPollMaxAttempts; attempt++) {
-    const pollResponse = httpClient
-      .sendRequest(runtime, {
-        url: `${base}/v1/inference/${encodeURIComponent(inferenceId)}`,
-        method: "GET",
-        headers: authHeaders(caiApiKey),
-        timeout: CRE_HTTP_TIMEOUT,
-      })
-      .result();
+    const pollResponse = creHttp(runtime, {
+      url: `${base}/v1/inference/${encodeURIComponent(inferenceId)}`,
+      method: "GET",
+      headers: authHeaders(caiApiKey),
+      timeout: CRE_HTTP_TIMEOUT,
+    });
     const pollText = requireHttpOk(pollResponse, `CAI poll ${inferenceId} attempt ${attempt}`);
     const pollParsed = JSON.parse(pollText) as CaiStatus;
     lastStatus = pollParsed.status ?? "queued";
@@ -532,17 +570,17 @@ export async function caiAttest(
   finalizeCaiPollStatus(lastStatus);
 }
 
-export async function publishToWalrus(
+export function publishToWalrus(
   runtime: Runtime<Config>,
   runId: string,
   apiKey: string,
   attestation?: CaiAttestation,
-): Promise<{
+): {
   manifest: ScoreManifest;
   walrus_manifest_blob_id: string;
   walrus_eval_blob_id: string;
   walrus_index_blob_id?: string;
-}> {
+} {
   const base = runtime.config.evalRunnerUrl.replace(/\/$/, "");
   const body = JSON.stringify({
     run_id: runId,
@@ -550,15 +588,13 @@ export async function publishToWalrus(
   });
 
   runtime.log(`POST /eval/publish (async) run_id=${runId}`);
-  const response = httpClient
-    .sendRequest(runtime, {
-      url: `${base}/eval/publish`,
-      method: "POST",
-      body: encodeHttpBody(body),
-      headers: jsonAuthHeaders(apiKey),
-      timeout: CRE_HTTP_TIMEOUT,
-    })
-    .result();
+  const response = creHttp(runtime, {
+    url: `${base}/eval/publish`,
+    method: "POST",
+    body: encodeHttpBody(body),
+    headers: jsonAuthHeaders(apiKey),
+    timeout: CRE_HTTP_TIMEOUT,
+  });
   const bodyText = requireHttpOk(response, `eval/publish run_id=${runId}`, [200, 202]);
   const accepted = JSON.parse(bodyText) as { run_id?: string; status?: string };
   runtime.log(`eval/publish accepted run_id=${runId} status=${accepted.status ?? "published"}`);
@@ -587,15 +623,13 @@ export function registerCaiSubmitted(
   apiKey: string,
 ): void {
   const base = runtime.config.evalRunnerUrl.replace(/\/$/, "");
-  const response = httpClient
-    .sendRequest(runtime, {
-      url: `${base}/eval/cai-submitted`,
-      method: "POST",
-      body: encodeHttpBody(JSON.stringify({ inference_id: inferenceId, run_id: runId })),
-      headers: jsonAuthHeaders(apiKey),
-      timeout: CRE_HTTP_TIMEOUT,
-    })
-    .result();
+  const response = creHttp(runtime, {
+    url: `${base}/eval/cai-submitted`,
+    method: "POST",
+    body: encodeHttpBody(JSON.stringify({ inference_id: inferenceId, run_id: runId })),
+    headers: jsonAuthHeaders(apiKey),
+    timeout: CRE_HTTP_TIMEOUT,
+  });
   requireHttpOk(response, `eval/cai-submitted inference_id=${inferenceId}`);
   runtime.log(`registered inference_id=${inferenceId} -> run_id=${runId}`);
 }
@@ -622,15 +656,13 @@ export function recordPair(
     run_id: runId,
     models_total: modelsTotal,
   });
-  const response = httpClient
-    .sendRequest(runtime, {
-      url: `${base}/eval/pair`,
-      method: "POST",
-      body: encodeHttpBody(body),
-      headers: jsonAuthHeaders(apiKey),
-      timeout: CRE_HTTP_TIMEOUT,
-    })
-    .result();
+  const response = creHttp(runtime, {
+    url: `${base}/eval/pair`,
+    method: "POST",
+    body: encodeHttpBody(body),
+    headers: jsonAuthHeaders(apiKey),
+    timeout: CRE_HTTP_TIMEOUT,
+  });
   const bodyText = requireHttpOk(response, `eval/pair ${target.mcp}/${target.capability}`);
   return JSON.parse(bodyText) as { complete: boolean; runs: Record<string, string> };
 }
@@ -638,13 +670,11 @@ export function recordPair(
 /** Resolve an MCP name to its onchain agent id via the eval-runner (nameToAgentId). 0 = unresolved. */
 export function fetchAgentId(runtime: Runtime<Config>, mcp: string): number {
   const base = runtime.config.evalRunnerUrl.replace(/\/$/, "");
-  const response = httpClient
-    .sendRequest(runtime, {
-      url: `${base}/agent-id?mcp=${encodeURIComponent(mcp)}`,
-      method: "GET",
-      timeout: CRE_HTTP_TIMEOUT,
-    })
-    .result();
+  const response = creHttp(runtime, {
+    url: `${base}/agent-id?mcp=${encodeURIComponent(mcp)}`,
+    method: "GET",
+    timeout: CRE_HTTP_TIMEOUT,
+  });
   const bodyText = requireHttpOk(response, `agent-id ${mcp}`);
   const parsed = JSON.parse(bodyText) as { agent_id?: number };
   return parsed.agent_id ?? 0;
@@ -657,14 +687,12 @@ export function fetchManifestByRunId(
   apiKey: string,
 ): ScoreManifest {
   const base = runtime.config.evalRunnerUrl.replace(/\/$/, "");
-  const response = httpClient
-    .sendRequest(runtime, {
-      url: `${base}/eval/runs/${encodeURIComponent(runId)}`,
-      method: "GET",
-      headers: authHeaders(apiKey),
-      timeout: CRE_HTTP_TIMEOUT,
-    })
-    .result();
+  const response = creHttp(runtime, {
+    url: `${base}/eval/runs/${encodeURIComponent(runId)}`,
+    method: "GET",
+    headers: authHeaders(apiKey),
+    timeout: CRE_HTTP_TIMEOUT,
+  });
   const bodyText = requireHttpOk(response, `eval/runs/${runId}`);
   const parsed = JSON.parse(bodyText) as { manifest?: ScoreManifest };
   if (!parsed.manifest) {
@@ -696,15 +724,13 @@ export function publishByInferenceId(
   const body = JSON.stringify({ inference_id: inferenceId, attestation });
 
   runtime.log(`POST /eval/publish (by inference_id=${inferenceId})`);
-  const response = httpClient
-    .sendRequest(runtime, {
-      url: `${base}/eval/publish`,
-      method: "POST",
-      body: encodeHttpBody(body),
-      headers: jsonAuthHeaders(apiKey),
-      timeout: CRE_HTTP_TIMEOUT,
-    })
-    .result();
+  const response = creHttp(runtime, {
+    url: `${base}/eval/publish`,
+    method: "POST",
+    body: encodeHttpBody(body),
+    headers: jsonAuthHeaders(apiKey),
+    timeout: CRE_HTTP_TIMEOUT,
+  });
   const bodyText = requireHttpOk(response, `eval/publish inference_id=${inferenceId}`, [200, 202]);
   const accepted = JSON.parse(bodyText) as { run_id?: string; status?: string };
   const runId = accepted.run_id;
@@ -769,11 +795,11 @@ function resolveArcClient(
  * Depends on NOTHING from Walrus, so handler B calls this first — the attestation
  * lands on-chain without waiting on the Walrus upload.
  */
-export async function writeAttestationToArc(
+export function writeAttestationToArc(
   runtime: Runtime<Config>,
   agentId: number,
   attestation: CaiAttestation,
-): Promise<{ attestationRecordTxHash?: string }> {
+): { attestationRecordTxHash?: string } {
   const arc = resolveArcClient(runtime);
   if (!arc || !attestation.inference_id?.trim()) return {};
 
@@ -796,13 +822,13 @@ export async function writeAttestationToArc(
 }
 
 /** Write the capability score + Walrus blob pointer to Arc (updateCapabilityScore). */
-export async function writeScoreToArc(
+export function writeScoreToArc(
   runtime: Runtime<Config>,
   agentId: number,
   capability: string,
   manifest: ScoreManifest,
   walrusBlobId: string,
-): Promise<{ scoreTxHash?: string }> {
+): { scoreTxHash?: string } {
   const arc = resolveArcClient(runtime);
   if (!arc) return {};
 
@@ -837,31 +863,31 @@ export async function writeScoreToArc(
 }
 
 /** Combined score + attestation write (inline runPipeline fallback path). */
-export async function writeToArc(
+export function writeToArc(
   runtime: Runtime<Config>,
   agentId: number,
   capability: string,
   manifest: ScoreManifest,
   walrusBlobId: string,
   attestation?: CaiAttestation,
-): Promise<{ scoreTxHash?: string; attestationRecordTxHash?: string }> {
-  const { scoreTxHash } = await writeScoreToArc(runtime, agentId, capability, manifest, walrusBlobId);
+): { scoreTxHash?: string; attestationRecordTxHash?: string } {
+  const { scoreTxHash } = writeScoreToArc(runtime, agentId, capability, manifest, walrusBlobId);
   const { attestationRecordTxHash } = attestation
-    ? await writeAttestationToArc(runtime, agentId, attestation)
+    ? writeAttestationToArc(runtime, agentId, attestation)
     : {};
   return { scoreTxHash, attestationRecordTxHash };
 }
 
-export async function runPipeline(
+export function runPipeline(
   runtime: Runtime<Config>,
   target: PipelineTarget,
-): Promise<PipelineResult> {
+): PipelineResult {
   const config = runtime.config;
   const agentId = target.agentId ?? config.defaultAgentId;
   runtime.log(`runPipeline start mcp=${target.mcp} capability=${target.capability} agentId=${agentId}`);
 
   const evalRunnerApiKey = getEvalRunnerApiKey(runtime);
-  const scored = await runEvalScore(runtime, target, evalRunnerApiKey);
+  const scored = runEvalScore(runtime, target, evalRunnerApiKey);
 
   const caiApiKey = getCaiApiKey(runtime);
   let attestation: CaiAttestation | undefined;
@@ -883,10 +909,10 @@ export async function runPipeline(
         "chainlinkCaiUrl config required when CHAINLINK_CAI_API_KEY is set — refusing silent CAI skip",
       );
     }
-    attestation = await caiAttest(runtime, scored.manifest, caiApiKey);
+    attestation = caiAttest(runtime, scored.manifest, caiApiKey);
   }
 
-  const published = await publishToWalrus(
+  const published = publishToWalrus(
     runtime,
     scored.run_id,
     evalRunnerApiKey,
@@ -902,7 +928,7 @@ export async function runPipeline(
     skippedArc = true;
     runtime.log("arcRegistryAddress empty — skipping Arc registry write after Walrus publish");
   } else {
-    const arcResult = await writeToArc(
+    const arcResult = writeToArc(
       runtime,
       agentId,
       target.capability,

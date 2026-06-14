@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DEMO_PROMPTS, parseDemoPrompt } from "../src/lib/intent";
+import { CHAT_DEMO_PROMPTS, parseDemoPrompt } from "../src/lib/intent";
 
 describe("parseDemoPrompt", () => {
   test("parses portfolio swap prompt into structured intent", () => {
@@ -17,13 +17,13 @@ describe("parseDemoPrompt", () => {
   });
 
   test("parses quote prompt with explicit min score", () => {
-    const prompt = "Get best ETH/USDC quote with min reliability ≥ 0.85";
+    const prompt = "Get best ETH/USDC quote with min reliability ≥ 0.15";
     const intent = parseDemoPrompt(prompt);
 
     expect(intent.action).toBe("DeFi Quote");
     expect(intent.assetsFrom).toBe("ETH");
     expect(intent.assetsTo).toBe("USDC");
-    expect(intent.minReliabilityScore).toBeCloseTo(0.85);
+    expect(intent.minReliabilityScore).toBeCloseTo(0.15);
     expect(intent.marketplaceCapability).toBe("quote");
   });
 
@@ -38,14 +38,11 @@ describe("parseDemoPrompt", () => {
     expect(intent.marketplaceCapability).toBe("route");
   });
 
-  test("demo prompts are non-empty strings parsed successfully", () => {
-    for (const prompt of DEMO_PROMPTS) {
-      const intent = parseDemoPrompt(prompt.text);
-      expect(intent.action.length).toBeGreaterThan(0);
-      expect(intent.assetsFrom.length).toBeGreaterThan(0);
-      expect(intent.assetsTo.length).toBeGreaterThan(0);
-      expect(intent.minReliabilityScore).toBeGreaterThan(0);
-      expect(intent.minReliabilityScore).toBeLessThanOrEqual(1);
+  test("chat demo prompts are defined for concierge quick actions", () => {
+    expect(CHAT_DEMO_PROMPTS.length).toBeGreaterThan(0);
+    for (const prompt of CHAT_DEMO_PROMPTS) {
+      expect(prompt.id.length).toBeGreaterThan(0);
+      expect(prompt.text.trim().length).toBeGreaterThan(0);
     }
   });
 });
