@@ -1,0 +1,11 @@
+<svg viewBox="0 0 200 40" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ETHGlobal">
+  <defs>
+    <linearGradient id="egGem" x1="4" y1="0" x2="36" y2="40" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#627EEA"/>
+      <stop offset="1" stop-color="#9333EA"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#egGem)" d="M20 2 34 20 20 38 6 20 20 2Zm0 6.5L12.5 20 20 31.5 27.5 20 20 8.5Z"/>
+  <path fill="url(#egGem)" opacity="0.55" d="M20 8.5 27.5 20 20 31.5 12.5 20 20 8.5Z"/>
+  <text x="44" y="26" fill="#E2E8F0" font-family="system-ui, -apple-system, sans-serif" font-size="17" font-weight="700" letter-spacing="-0.02em">ETHGlobal</text>
+</svg>
