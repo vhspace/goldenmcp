@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { GoldenMcpLogo } from "@/components/GoldenMcpLogo";
 import {
   LANDING_CTA,
   LANDING_FEATURES,
@@ -7,16 +8,6 @@ import {
   LANDING_SECURITY,
 } from "@/lib/landing-content";
 import styles from "./landing.module.css";
-
-function LogoMark() {
-  return (
-    <span className={styles.logoMark} aria-hidden>
-      {Array.from({ length: 9 }).map((_, i) => (
-        <span key={i} />
-      ))}
-    </span>
-  );
-}
 
 export function LandingPage() {
   return (
@@ -28,10 +19,7 @@ export function LandingPage() {
       <div className={styles.arcRight} aria-hidden />
 
       <header className={styles.navBar}>
-        <Link href="/" className={styles.logo}>
-          <LogoMark />
-          GoldenMCP
-        </Link>
+        <GoldenMcpLogo size="md" className={styles.logoImage} priority />
         <nav className={styles.navLinks} aria-label="Primary">
           {LANDING_NAV.map((link) =>
             link.href.startsWith("#") ? (
