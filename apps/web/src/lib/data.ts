@@ -8,11 +8,62 @@ import {
 
 export type { LeaderboardEntry, VendorProfile };
 
-const REGISTRY_ABI = parseAbi([
-  "function nextAgentId() view returns (uint256)",
-  "function getRecord(uint256 agentId) view returns (string name, string mcpEndpoint, string agentUri, string ensName, string lastAttestationId, bytes32 lastTranscriptHash, bool exists)",
-  "function getCapabilityScore(uint256 agentId, string capability) view returns (uint16 dataScoreBps, uint16 pathScoreBps, uint16 tokenScoreBps, uint16 compositeBps, bool failed, string walrusBlobId)",
-]);
+const ZERO_BYTES32 = `0x${"0".repeat(64)}`;
+
+/** Tuple ABI — viem mis-decodes flattened struct returns for getRecord/getCapabilityScore. */
+const REGISTRY_ABI = [
+  {
+    type: "function",
+    name: "nextAgentId",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "getRecord",
+    stateMutability: "view",
+    inputs: [{ name: "agentId", type: "uint256" }],
+    outputs: [
+      {
+        type: "tuple",
+        name: "",
+        components: [
+          { name: "name", type: "string" },
+          { name: "mcpEndpoint", type: "string" },
+          { name: "agentUri", type: "string" },
+          { name: "ensName", type: "string" },
+          { name: "lastAttestationId", type: "string" },
+          { name: "lastTranscriptHash", type: "bytes32" },
+          { name: "exists", type: "bool" },
+        ],
+      },
+    ],
+  },
+  {
+    type: "function",
+    name: "getCapabilityScore",
+    stateMutability: "view",
+    inputs: [
+      { name: "agentId", type: "uint256" },
+      { name: "capability", type: "string" },
+    ],
+    outputs: [
+      {
+        type: "tuple",
+        name: "",
+        components: [
+          { name: "dataScoreBps", type: "uint16" },
+          { name: "pathScoreBps", type: "uint16" },
+          { name: "tokenEfficiencyBps", type: "uint16" },
+          { name: "compositeBps", type: "uint16" },
+          { name: "failed", type: "bool" },
+          { name: "walrusBlobId", type: "string" },
+        ],
+      },
+    ],
+  },
+] as const;
 
 function getClient() {
   const rpc = process.env.NEXT_PUBLIC_ARC_RPC_URL;
@@ -44,28 +95,35 @@ export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
       functionName: "getRecord",
       args: [id],
     });
-    if (!rec[6]) continue;
+    if (!rec.exists) continue;
     for (const cap of CAPABILITIES) {
-      const score = await client.readContract({
-        address: registry,
-        abi: REGISTRY_ABI,
-        functionName: "getCapabilityScore",
-        args: [id, cap],
-      });
-      if (!score[5]) continue;
+      let score;
+      try {
+        score = await client.readContract({
+          address: registry,
+          abi: REGISTRY_ABI,
+          functionName: "getCapabilityScore",
+          args: [id, cap],
+        });
+      } catch {
+        continue;
+      }
+      if (!score.walrusBlobId) continue;
       entries.push({
-        mcp: rec[0],
+        mcp: rec.name,
         capability: cap,
-        dataScore: Number(score[0]) / 10000,
-        pathScore: Number(score[1]) / 10000,
-        tokenEfficiency: Number(score[2]) / 10000,
-        composite: Number(score[3]) / 10000,
-        failed: score[4],
-        walrusBlobId: score[5],
-        ensName: rec[3],
-        attestationRef: rec[4],
+        dataScore: score.dataScoreBps / 10000,
+        pathScore: score.pathScoreBps / 10000,
+        tokenEfficiency: score.tokenEfficiencyBps / 10000,
+        composite: score.compositeBps / 10000,
+        failed: score.failed,
+        walrusBlobId: score.walrusBlobId,
+        ensName: rec.ensName,
+        attestationRef: rec.lastAttestationId,
         transcriptHash:
-          rec[5] && rec[5] !== `0x${"0".repeat(64)}` ? rec[5] : "",
+          rec.lastTranscriptHash && rec.lastTranscriptHash !== ZERO_BYTES32
+            ? rec.lastTranscriptHash
+            : "",
       });
     }
   }
