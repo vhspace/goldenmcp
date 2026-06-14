@@ -100,7 +100,7 @@ guess_local_ssh_key() {
         return 0
       fi
     done
-  done < <(python3 -c 'import json,sys; [print(x) for x in json.loads(sys.argv[1])]' "${SSH_FPS_JSON}")
+  done < <(python3 -c 'import json,sys; data=json.loads(sys.argv[1]); [print(x) for x in data]' "${SSH_FPS_JSON}" 2>/dev/null)
   return 1
 }
 
@@ -119,7 +119,7 @@ load_from_terraform_output() {
     return 1
   fi
   SOURCE="terraform_output"
-  read -r DROPLET_IP DROPLET_ID HEALTH_URL SSH_COMMAND SSH_KEY_NAMES_JSON SSH_FPS_JSON <<<"$(
+  IFS=$'\t' read -r DROPLET_IP DROPLET_ID HEALTH_URL SSH_COMMAND SSH_KEY_NAMES_JSON SSH_FPS_JSON <<<"$(
     python3 -c '
 import json, sys
 data = json.load(sys.stdin)
@@ -132,7 +132,7 @@ health = val("health_check_url") or ""
 ssh = val("ssh_command") or ""
 names = json.dumps(val("ssh_key_names") or [])
 fps = json.dumps(val("ssh_key_fingerprints") or [])
-print(ip, did, health, ssh, names, fps)
+print("\t".join([ip, did, health, ssh, names, fps]))
 ' <<<"${out}"
   )"
   [[ -n "${DROPLET_IP}" ]] || return 1
@@ -147,7 +147,7 @@ load_from_tfstate() {
     return 1
   fi
   SOURCE="terraform_tfstate"
-  read -r DROPLET_IP DROPLET_ID SSH_KEY_NAMES_JSON SSH_FPS_JSON <<<"$(
+  IFS=$'\t' read -r DROPLET_IP DROPLET_ID SSH_KEY_NAMES_JSON SSH_FPS_JSON <<<"$(
     python3 -c '
 import json, sys
 with open(sys.argv[1]) as f:
@@ -184,7 +184,7 @@ for key, out in (state.get("outputs") or {}).items():
         names = val
     if key == "ssh_key_fingerprints" and val:
         fps = val
-print(ip, did, json.dumps(names), json.dumps(fps))
+print("\t".join([ip, did, json.dumps(names), json.dumps(fps)]))
 ' "${TFSTATE}"
   )"
   [[ -n "${DROPLET_IP}" ]] || return 1
@@ -241,7 +241,7 @@ load_from_do_api() {
     echo "ERROR: DO API droplet list failed (tag=${DROPLET_TAG})" >&2
     exit 1
   }
-  read -r DROPLET_IP DROPLET_ID SSH_KEY_NAMES_JSON SSH_FPS_JSON <<<"$(
+  IFS=$'\t' read -r DROPLET_IP DROPLET_ID SSH_KEY_NAMES_JSON SSH_FPS_JSON <<<"$(
     python3 -c '
 import json, sys
 data = json.load(sys.stdin)
@@ -263,7 +263,7 @@ names = []
 fps = []
 for kid in match.get("ssh_keys") or []:
     fps.append(str(kid))
-print(ip, did, json.dumps(names), json.dumps(fps))
+print("\t".join([ip, did, json.dumps(names), json.dumps(fps)]))
 ' "${DROPLET_NAME}" <<<"${response}"
   )" || {
     echo "ERROR: no droplet found with tag ${DROPLET_TAG} or name ${DROPLET_NAME}" >&2
