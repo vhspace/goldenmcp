@@ -257,6 +257,13 @@ async function main() {
 
     const batch = ens(["set", "batch", subname, "--chain", "sepolia", "--data", JSON.stringify(records)]);
     await send("set records", batch);
+
+    // Forward addr record → the owning wallet, so the name forward-resolves to
+    // the address (useful on its own and a prerequisite for any future primary
+    // name; ENSv2 reverse/primary names for v2-only subnames are deferred —
+    // reverse still resolves through v1 infra at launch, see issue #104).
+    const addrOut = ens(["set", "address", subname, "--address", wallet, "--chain", "sepolia"]);
+    await send("set addr", addrOut);
   }
 
   console.log("\nDone.");
