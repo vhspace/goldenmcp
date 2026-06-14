@@ -11,6 +11,8 @@ build/
 node_modules/
 .next/
 out/
+test-results/
+playwright-report/
 contracts/mcp-registry/cache/
 contracts/mcp-registry/out/
 contracts/mcp-registry/broadcast/

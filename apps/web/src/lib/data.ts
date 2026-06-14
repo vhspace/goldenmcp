@@ -1,4 +1,4 @@
-import { createPublicClient, http, parseAbi } from "viem";
+import { createPublicClient, http } from "viem";
 import {
   aggregateVendorProfiles,
   extractLatencyMsFromEvalLog,
@@ -216,22 +216,17 @@ export async function fetchVendorProfiles(): Promise<VendorProfile[]> {
 export async function resolveENS(name: string) {
   const rpc = process.env.NEXT_PUBLIC_ENS_RPC_URL;
   if (!rpc) throw new Error("NEXT_PUBLIC_ENS_RPC_URL is not set");
-  const { createPublicClient, http, namehash } = await import("viem");
-  const { mainnet } = await import("viem/chains");
-  const client = createPublicClient({ chain: mainnet, transport: http(rpc) });
-  const resolver = await client.getEnsResolver({ name });
-  if (!resolver) throw new Error(`No resolver for ${name}`);
-  const node = namehash(name);
+  const { createPublicClient, http } = await import("viem");
+  const { sepolia } = await import("viem/chains");
+  const client = createPublicClient({ chain: sepolia, transport: http(rpc) });
   const keys = ["agent-context", "agent-endpoint[mcp]", "goldenmcp/eval-blob"];
   const result: Record<string, string> = {};
   for (const key of keys) {
-    const value = await client.readContract({
-      address: resolver,
-      abi: parseAbi(["function text(bytes32 node, string key) view returns (string)"]),
-      functionName: "text",
-      args: [node, key],
-    });
+    const value = await client.getEnsText({ name, key });
     if (value) result[key] = value;
+  }
+  if (Object.keys(result).length === 0) {
+    throw new Error(`No ENS text records found for ${name} on Sepolia`);
   }
   return result;
 }

@@ -32,3 +32,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: cd apps/web && bun install && bun test
+
+  web-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: cd apps/web && bun install && bun run test:e2e:install
+      - name: Playwright E2E
+        env:
+          NEXT_PUBLIC_ARC_RPC_URL: ${{ secrets.NEXT_PUBLIC_ARC_RPC_URL }}
+          NEXT_PUBLIC_REGISTRY_ADDRESS: ${{ secrets.NEXT_PUBLIC_REGISTRY_ADDRESS }}
+          NEXT_PUBLIC_WALRUS_AGGREGATOR_URL: ${{ secrets.NEXT_PUBLIC_WALRUS_AGGREGATOR_URL }}
+          NEXT_PUBLIC_ENS_RPC_URL: ${{ secrets.NEXT_PUBLIC_ENS_RPC_URL }}
+        run: cd apps/web && bun run test:e2e
