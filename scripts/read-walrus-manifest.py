@@ -22,7 +22,9 @@ def fetch(blob_id):
         return r.read()
 
 
-for ag, mcp, cap in [(1, "lifi", "quote"), (3, "odos", "quote")]:
+for ag, mcp, cap in [(1, "lifi", "quote"), (3, "odos", "quote"),
+                     (4, "jupiter", "quote"), (4, "jupiter", "positions"),
+                     (5, "kyberswap", "quote"), (2, "1inch", "swap")]:
     s = c.functions.getCapabilityScore(ag, cap).call()
     blob = s[5]
     print(f"=== {mcp}/{cap}  on-chain walrusBlobId={blob}")
@@ -30,7 +32,7 @@ for ag, mcp, cap in [(1, "lifi", "quote"), (3, "odos", "quote")]:
         raw = fetch(blob)
         m = json.loads(raw)
         print(f"   manifest keys: {sorted(m.keys())}")
-        print(f"   composite={m.get('composite')} run_id={m.get('run_id')}")
+        print(f"   composite={m.get('composite')} latency_ms={m.get('latency_ms')} run_id={m.get('run_id')}")
         print(f"   walrus_blob_id(eval path)={m.get('walrus_blob_id')}")
         print(f"   walrus_eval_blob_id={m.get('walrus_eval_blob_id')}")
         print(f"   walrus_index_blob_id={m.get('walrus_index_blob_id')}")
