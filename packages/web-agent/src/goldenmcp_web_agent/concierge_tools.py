@@ -192,7 +192,10 @@ def anthropic_tool_definitions() -> list[dict[str, Any]]:
         {
             "name": "lookup_mcp",
             "description": (
-                "Pay x402 USDC on Arc and lookup the best scored MCP for capability + min_score."
+                "Pay x402 USDC on Arc and return the best scored MCP for capability + min_score. "
+                "Settlement is a Gateway transfer UUID in the JSON — not an Arcscan tx hash; "
+                "tell the user 'Gateway transfer ID: …' and do not link UUIDs to arcscan. "
+                "After success, call lifi_quote_eth_to_usdc for ETH→USDC quotes (winner is discovery only)."
             ),
             "input_schema": {
                 "type": "object",
@@ -250,8 +253,9 @@ def anthropic_tool_definitions() -> list[dict[str, Any]]:
         {
             "name": "lifi_quote_eth_to_usdc",
             "description": (
-                "Quote ETH→USDC on Base via LI.FI get-quote using canonical eval addresses. "
-                "Prefer this over raw call_vendor_mcp_tool for ETH/USDC quotes."
+                "Quote ETH→USDC on Base via LI.FI get-quote (canonical eval addresses). "
+                "Call this after lookup_mcp for any ETH→USDC request — even if KyberSwap or another "
+                "vendor won the marketplace lookup. Default amount_eth=0.001."
             ),
             "input_schema": {
                 "type": "object",
@@ -271,10 +275,10 @@ def anthropic_tool_definitions() -> list[dict[str, Any]]:
         {
             "name": "call_vendor_mcp_tool",
             "description": (
-                "Call a read-only vendor MCP tool. For LI.FI get-quote on Base you MUST pass "
-                "fromChain/toChain (8453), full 0x fromToken/toToken addresses, fromAmount as "
-                "wei string, and fromAddress. Prefer lifi_quote_eth_to_usdc for ETH→USDC. "
-                "Never call get-tokens (response is huge); use get-token for one symbol."
+                "Call a read-only vendor MCP tool. Avoid for ETH→USDC on Base — use lifi_quote_eth_to_usdc. "
+                "KyberSwap get-quote needs chain='base', tokenIn/tokenOut symbols, amountIn as human ETH "
+                "(e.g. '0.001'), not wei. LI.FI via this tool needs full 0x addresses and wei fromAmount. "
+                "Never call get-tokens. Vendor aliases: lifi, kyberswap, odos, 1inch, jupiter."
             ),
             "input_schema": {
                 "type": "object",

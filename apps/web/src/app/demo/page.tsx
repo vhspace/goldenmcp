@@ -1,6 +1,5 @@
 import { fetchVendorProfiles } from "@/lib/data";
 import { VendorPerformanceCard } from "@/components/VendorPerformanceCard";
-import { ExecutionSandbox } from "@/components/ExecutionSandbox";
 import { ChatConcierge } from "@/components/ChatConcierge";
 import { GOLDEN_SCORE_THRESHOLDS, METER_THRESHOLDS, type VendorProfile } from "@/lib/vendors";
 
@@ -28,9 +27,7 @@ export default async function DemoPage() {
 
       <ChatConcierge />
 
-      <ExecutionSandbox />
-
-      <section style={{ marginTop: "1rem" }}>
+      <section style={{ marginTop: "2.5rem" }}>
         <h2 style={{ margin: "0 0 1.25rem", fontSize: "1.35rem" }}>Global Overview Room</h2>
 
       {error && (
