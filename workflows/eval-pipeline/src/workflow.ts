@@ -49,15 +49,15 @@ function filterBenchmarks(
  * the manifest to CAI with cre_callback = this workflow's HTTP trigger, and return.
  * CAI's completion POST starts a fresh HTTP-trigger execution (handler B).
  */
-async function submitForAttestation(
+function submitForAttestation(
   runtime: Runtime<Config>,
   target: PipelineTarget,
   model?: string,
   modelsTotal = 1,
-): Promise<string> {
+): string {
   const config = runtime.config;
   const evalRunnerApiKey = getEvalRunnerApiKey(runtime);
-  const scored = await runEvalScore(runtime, target, evalRunnerApiKey, model);
+  const scored = runEvalScore(runtime, target, evalRunnerApiKey, model);
 
   const caiApiKey = getCaiApiKey(runtime);
   if (!caiApiKey) {
@@ -115,7 +115,7 @@ function fetchNextBenchmark(runtime: Runtime<Config>): {
   return JSON.parse(resp.bodyText) as { mcp: string; capability: string; index: number; total: number };
 }
 
-async function onCronTrigger(runtime: Runtime<Config>): Promise<string> {
+function onCronTrigger(runtime: Runtime<Config>): string {
   const config = runtime.config;
   runtime.log("GoldenMCP eval pipeline cron triggered");
 
@@ -190,9 +190,9 @@ async function onCronTrigger(runtime: Runtime<Config>): Promise<string> {
       agentId: bench.agentId && bench.agentId > 0 ? bench.agentId : config.defaultAgentId,
     };
     if (asyncMode) {
-      results.push(await submitForAttestation(runtime, target, bench.model, bench.modelsTotal ?? 1));
+      results.push(submitForAttestation(runtime, target, bench.model, bench.modelsTotal ?? 1));
     } else {
-      const result = await runPipeline(runtime, target);
+      const result = runPipeline(runtime, target);
       results.push(`${bench.mcp}/${bench.capability}:${result.manifest.composite}`);
     }
   }
@@ -207,10 +207,10 @@ async function onCronTrigger(runtime: Runtime<Config>): Promise<string> {
  * holds the inference_id -> run_id map), publish to Walrus, and write to Arc.
  * This is a fresh execution started by the callback.
  */
-async function onAttestationCallback(
+function onAttestationCallback(
   runtime: Runtime<Config>,
   payload: HTTPPayload,
-): Promise<string> {
+): string {
   const config = runtime.config;
   const wrapper = JSON.parse(bytesToString(payload.input)) as { input?: CaiStatus } & CaiStatus;
   // CAI wraps the status as {"input": <status>}; tolerate a bare status too.
@@ -239,10 +239,10 @@ async function onAttestationCallback(
   runtime.log(`handler B writing to agentId=${agentId} (mcp=${published.mcp})`);
 
   // 2) Record the attestation on-chain (inference id + transcript hash).
-  const { attestationRecordTxHash } = await writeAttestationToArc(runtime, agentId, attestation);
+  const { attestationRecordTxHash } = writeAttestationToArc(runtime, agentId, attestation);
 
   // 3) Write the score row with the Walrus blob pointer.
-  const { scoreTxHash } = await writeScoreToArc(
+  const { scoreTxHash } = writeScoreToArc(
     runtime,
     agentId,
     published.capability,
