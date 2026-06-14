@@ -111,18 +111,66 @@ export async function fetchManifest(mcp: string, capability: string): Promise<Sc
   return fetchWalrusJson(entry.walrusBlobId);
 }
 
-async function fetchWalrusJson(blobId: string): Promise<Record<string, unknown>> {
+function walrusAggregator(): string {
   const aggregator = firstEnv("NEXT_PUBLIC_WALRUS_AGGREGATOR_URL", "WALRUS_AGGREGATOR_URL");
   if (!aggregator) {
     throw new Error(
       "NEXT_PUBLIC_WALRUS_AGGREGATOR_URL is not set (also tried WALRUS_AGGREGATOR_URL)",
     );
   }
-  const res = await fetch(`${aggregator}/v1/blobs/${blobId}`);
+  return aggregator.replace(/\/$/, "");
+}
+
+async function fetchWalrusJson(blobId: string): Promise<Record<string, unknown>> {
+  const res = await fetch(`${walrusAggregator()}/v1/blobs/${blobId}`);
   if (!res.ok) {
     throw new Error(`Walrus fetch failed for blob ${blobId}: HTTP ${res.status} ${await res.text()}`);
   }
   return res.json();
+}
+
+/**
+ * Resolve the actual Inspect `.eval` log to a concrete Walrus blob URL.
+ *
+ * The manifest's `walrus_blob_id` points at the eval log in one of two forms
+ * (see packages/inspect-web3 pipeline.py):
+ *   1. a direct Walrus blob id (no slashes) — fetchable at /v1/blobs/{id}; or
+ *   2. an indexed logical path `walrus://evals/goldenmcp/..._run.eval` that
+ *      must be resolved through the WalrusFileSystem index blob.
+ *
+ * For case (2) we load the index JSON (its blob id comes from WALRUS_INDEX_BLOB_ID)
+ * and map the logical path -> concrete blob id. Returns the aggregator HTTP URL
+ * for the raw `.eval` bytes, or throws with an actionable message.
+ */
+export async function resolveEvalLogUrl(manifest: ScoreManifest): Promise<string> {
+  const ref = manifest.walrus_blob_id;
+  if (typeof ref !== "string" || !ref.trim()) {
+    throw new Error("manifest has no walrus_blob_id (no eval log reference)");
+  }
+  const aggregator = walrusAggregator();
+
+  // Case 1: direct blob id (single path segment, no scheme/slashes).
+  if (!ref.startsWith("walrus://") && !ref.includes("/")) {
+    return `${aggregator}/v1/blobs/${ref}`;
+  }
+
+  // Case 2: walrus:// indexed logical path -> resolve via the index blob.
+  const indexBlobId = firstEnv("WALRUS_INDEX_BLOB_ID", "NEXT_PUBLIC_WALRUS_INDEX_BLOB_ID");
+  if (!indexBlobId) {
+    throw new Error(
+      `eval log is at indexed path "${ref}" but WALRUS_INDEX_BLOB_ID is not set — ` +
+        "set the Walrus index blob id (printed by post_eval_walrus as walrus_index_blob_id) to resolve it",
+    );
+  }
+  const logical = ref.replace(/^walrus:\/\//, "").replace(/^\/+/, "").replace(/\/+$/, "");
+  const index = (await fetchWalrusJson(indexBlobId)) as {
+    files?: Record<string, { blob_id?: string }>;
+  };
+  const entry = index.files?.[logical];
+  if (!entry?.blob_id) {
+    throw new Error(`Walrus index has no entry for "${logical}" (index blob ${indexBlobId})`);
+  }
+  return `${aggregator}/v1/blobs/${entry.blob_id}`;
 }
 
 export async function fetchVendorProfiles(): Promise<VendorProfile[]> {
