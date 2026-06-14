@@ -34,6 +34,11 @@ const PARENT = process.env.ENS_PARENT_NAME || "goldenmcp.eth";
 const USDC = "0x3DfC8b53dAFa5eBbb071a8B97678Ab534Ed838D9"; // Sepolia ENSv2 dummy USDC
 const ARC_CHAIN_ID = 5042002;
 const CAPABILITIES = ["quote", "route", "trade", "swap"];
+// Capability TTL: a subname expires this many days after its last eval, so a
+// lapsed agent identity auto-decays (re-eval renews it). Configurable via
+// ENS_SUBNAME_TTL_DAYS; aligns with the nightly re-eval cadence.
+const TTL_DAYS = Number(process.env.ENS_SUBNAME_TTL_DAYS || "30");
+const TTL_SECONDS = Math.round(TTL_DAYS * 86400);
 
 function env(key: string): string {
   const m = readFileSync(process.cwd() + "/.env", "utf8").match(
@@ -136,25 +141,18 @@ async function main() {
     throw new Error("ProxyDeployed event not found in deploy receipt");
   }
 
-  // UniversalResolver V2 (same address mainnet + Sepolia). Used to detect
-  // whether a subname already has a resolver (i.e. has been created).
-  const URV2 = "0xeEeEEEeE14D718C2B47D9923Deab1335E144EeEe";
-  const findResolverAbi = parseAbi([
-    "function findResolver(bytes name) view returns (address resolver, bytes32 node, uint256 offset)",
+  // ENSv2 UserRegistry: read/extend a subname's expiry. renew() cannot reduce
+  // expiry and reverts on an expired name (which must be re-registered), so it
+  // is the safe idempotent way to push a live subname's TTL forward.
+  const subregistryAbi = parseAbi([
+    "function findExpiry(string label) view returns (uint64)",
+    "function findTokenId(string label) view returns (uint256)",
+    "function renew(uint256 anyId, uint64 newExpiry)",
   ]);
-  async function hasResolver(name: string): Promise<boolean> {
-    const dns = "0x" + name.split(".").map((l) => {
-      const h = Buffer.from(l, "utf8").toString("hex");
-      return (l.length).toString(16).padStart(2, "0") + h;
-    }).join("") + "00";
-    try {
-      const [resolver] = (await pub.readContract({
-        address: getAddress(URV2), abi: findResolverAbi, functionName: "findResolver", args: [dns as `0x${string}`],
-      })) as [string, string, bigint];
-      return BigInt(resolver) !== 0n;
-    } catch {
-      return false;
-    }
+  async function findExpiry(subregistry: string, label: string): Promise<bigint> {
+    return (await pub.readContract({
+      address: getAddress(subregistry), abi: subregistryAbi, functionName: "findExpiry", args: [label],
+    })) as bigint;
   }
 
   // ── Parent setup (one-time, idempotent) ──────────────────────────────────
@@ -200,16 +198,18 @@ async function main() {
   // event), so after broadcasting we re-query deploy — which short-circuits to
   // `alreadySet` and hands back the registry address — before wiring it.
   const subregOut = ens(["subregistry", "deploy", PARENT, "--deployer", wallet, "--chain", "sepolia"]);
+  let subregistryAddr: `0x${string}` | undefined;
   if (subregOut.alreadySet) {
-    console.log(`  subregistry exists: ${subregOut.subregistry}`);
+    subregistryAddr = getAddress(subregOut.subregistry);
+    console.log(`  subregistry exists: ${subregistryAddr}`);
   } else if (DRY_RUN) {
     console.log("[dry-run] subregistry deploy + set (proxy address known only after broadcast)");
     await send("subregistry deploy", subregOut);
   } else {
     const rcpt = await send("subregistry deploy", subregOut);
-    const proxy = proxyFromReceipt(rcpt, subregOut.factory);
-    console.log(`  subregistry deployed: ${proxy}`);
-    const setOut = ens(["subregistry", "set", PARENT, "--registry", proxy, "--chain", "sepolia"]);
+    subregistryAddr = proxyFromReceipt(rcpt, subregOut.factory);
+    console.log(`  subregistry deployed: ${subregistryAddr}`);
+    const setOut = ens(["subregistry", "set", PARENT, "--registry", subregistryAddr, "--chain", "sepolia"]);
     await send("subregistry set", setOut);
   }
 
@@ -246,13 +246,26 @@ async function main() {
       { type: "text", key: `agent-registration[${registryKey}][${id}]`, value: "1" },
     ].filter((r) => r.value !== "");
 
-    // Create the subname only if it does not already resolve. `subname create`
-    // always returns calldata (it has no alreadyExists short-circuit) and the
-    // underlying register reverts on a live label, so gate on an on-chain check.
-    if (await hasResolver(subname)) {
-      console.log("  subname exists, skipping create");
+    // Create the subname with a TTL, or renew a live one to push its expiry
+    // forward (re-eval refreshes freshness). Existence is gauged by the
+    // subregistry's expiry (>0 = currently registered); findResolver can't be
+    // used because ENSv2 falls back to the PARENT resolver for an uncreated
+    // subname, so it would false-positive. `subname create` reverts on a live
+    // label and renew() cannot reduce expiry, so each path is guarded.
+    const newExpiry = BigInt(Math.floor(Date.now() / 1000) + TTL_SECONDS);
+    const current = subregistryAddr ? await findExpiry(subregistryAddr, label) : 0n;
+    if (current > 0n) {
+      if (subregistryAddr && newExpiry > current) {
+        const tokenId = (await pub.readContract({
+          address: subregistryAddr, abi: subregistryAbi, functionName: "findTokenId", args: [label],
+        })) as bigint;
+        const data = encodeFunctionData({ abi: subregistryAbi, functionName: "renew", args: [tokenId, newExpiry] });
+        await send(`renew (+${TTL_DAYS}d, expiry ${newExpiry})`, { to: subregistryAddr, data });
+      } else {
+        console.log(`  subname exists, expiry ${current} already >= target — no renew`);
+      }
     } else {
-      await send("subname create", ens(["subname", "create", subname, "--owner", wallet, "--chain", "sepolia"]));
+      await send(`subname create (TTL ${TTL_DAYS}d)`, ens(["subname", "create", subname, "--owner", wallet, "--duration", String(TTL_SECONDS), "--chain", "sepolia"]));
     }
 
     const batch = ens(["set", "batch", subname, "--chain", "sepolia", "--data", JSON.stringify(records)]);
