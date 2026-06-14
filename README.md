@@ -1,3 +1,20 @@
+<div align="center">
+
+<img src="docs/assets/goldenmcp-logo.png" alt="GoldenMCP" width="420" />
+
+<br/>
+
+[![CI](https://github.com/vhspace/goldenmcp/actions/workflows/ci.yml/badge.svg)](https://github.com/vhspace/goldenmcp/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](#license)
+[![Live demo](https://img.shields.io/badge/demo-live-brightgreen)](https://goldenmcp-e9l6.vercel.app/demo)
+
+[![Chainlink CRE + CAI](https://img.shields.io/badge/Chainlink-CRE%20%2B%20Confidential%20AI-375BD2?logo=chainlink&logoColor=white)](#chainlink--cre-eval-orchestration--confidential-ai-attestation)
+[![Arc x402](https://img.shields.io/badge/Arc-x402%20USDC%20nanopayments-000000)](#arc--x402-usdc-nanopayments-for-mcp-lookup)
+[![ENS](https://img.shields.io/badge/ENS-ENSIP--25%2F26-5298FF)](#ens--mcp-discovery-via-ensip-2526)
+[![Walrus](https://img.shields.io/badge/Walrus-blob%20storage-7B61FF)](#walrus--decentralized-eval-blob-storage-supporting-integration)
+
+</div>
+
 # GoldenMCP
 
 > An onchain reputation layer for Web3 MCP servers. Evals score live MCPs on data accuracy / tool-path / token efficiency; results are attested by Chainlink Confidential AI, stored on Walrus, written to a registry on Arc, and made discoverable via ENS — queryable by agents for a USDC nanopayment.
