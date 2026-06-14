@@ -26,6 +26,12 @@ export interface Config {
   pollBusyWait?: boolean;
   /** When set, cron/simulate only runs these `mcp/capability` pairs (required for useScoreOnly fixture). */
   benchmarkAllowlist?: string[];
+  /**
+   * Run ONE benchmark per cron fire via the eval-runner's round-robin cursor
+   * (GET /benchmarks/next), cycling through all benchmarks across fires. Keeps
+   * each execution under the CRE HTTP-call cap. Ignores benchmarkAllowlist.
+   */
+  rotateBenchmarks?: boolean;
   caiPollMaxAttempts: number;
   caiPollIntervalMs: number;
   inspectPollMaxAttempts: number;

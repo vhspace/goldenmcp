@@ -341,6 +341,7 @@ export async function runEvalScore(
   runtime: Runtime<Config>,
   target: PipelineTarget,
   apiKey: string,
+  model?: string,
 ): Promise<{ run_id: string; manifest: ScoreManifest }> {
   const config = runtime.config;
   const base = config.evalRunnerUrl.replace(/\/$/, "");
@@ -369,11 +370,14 @@ export async function runEvalScore(
     return parsed;
   }
 
-  runtime.log(`POST /eval/inspect (async) for ${target.mcp}/${target.capability}`);
-  const inspectBody = JSON.stringify({
-    mcp: target.mcp,
-    capability: target.capability,
-  });
+  runtime.log(
+    `POST /eval/inspect (async) for ${target.mcp}/${target.capability}${model ? ` model=${model}` : ""}`,
+  );
+  const inspectBody = JSON.stringify(
+    model
+      ? { mcp: target.mcp, capability: target.capability, model }
+      : { mcp: target.mcp, capability: target.capability },
+  );
   const response = httpClient
     .sendRequest(runtime, {
       url: `${base}/eval/inspect`,
@@ -399,8 +403,18 @@ export async function runEvalScore(
 
 export const CAI_MODEL = "gemma4";
 
-/** The verdict prompt sent to the CAI TEE for a score manifest. */
-export function caiReviewPrompt(): string {
+/** The verdict prompt sent to the CAI TEE. With >1 manifest (one per open-weight
+ * model), the judge sums/averages the per-model scores into one combined verdict. */
+export function caiReviewPrompt(manifestCount = 1): string {
+  if (manifestCount > 1) {
+    return [
+      `You are reviewing ${manifestCount} GoldenMCP eval score manifests for the SAME MCP server,`,
+      "each produced by a different open-weight model (the attached manifest_*.json files).",
+      "Combine them into one ensemble verdict: sum (then average) the per-model composite scores,",
+      "and check the models broadly agree.",
+      "Reply with a short verdict: state PASS or FAIL, the combined composite, and one sentence of reasoning.",
+    ].join("\n");
+  }
   return [
     "You are reviewing a GoldenMCP eval score manifest produced for an MCP server.",
     "Assess whether the scores in manifest.json are internally consistent and the composite is plausible.",
@@ -418,29 +432,34 @@ export function caiReviewPrompt(): string {
  */
 export function submitCaiInference(
   runtime: Runtime<Config>,
-  manifest: ScoreManifest,
+  manifests: ScoreManifest[],
   caiApiKey: string,
   callbackUrl?: string,
 ): string {
   const base = runtime.config.chainlinkCaiUrl.replace(/\/$/, "");
-  const manifestBase64 = bytesToBase64(new TextEncoder().encode(JSON.stringify(manifest)));
+  if (manifests.length === 0) {
+    throw new Error("submitCaiInference requires at least one manifest");
+  }
+  // One resource per model manifest (manifest.json, or manifest_1.json/... for an
+  // ensemble). The judge sums across them when there's more than one.
+  const resources = manifests.map((m, i) => ({
+    filename: manifests.length === 1 ? "manifest.json" : `manifest_${i + 1}.json`,
+    content_type: "application/json",
+    content_base64: bytesToBase64(new TextEncoder().encode(JSON.stringify(m))),
+  }));
 
   const submitBody: Record<string, unknown> = {
     model: CAI_MODEL,
-    prompt: caiReviewPrompt(),
-    resources: [
-      {
-        filename: "manifest.json",
-        content_type: "application/json",
-        content_base64: manifestBase64,
-      },
-    ],
+    prompt: caiReviewPrompt(manifests.length),
+    resources,
   };
   if (callbackUrl) {
     submitBody.cre_callback = { url: callbackUrl };
   }
 
-  runtime.log(`CAI POST /v1/inference model=${CAI_MODEL} run_id=${manifest.run_id}`);
+  runtime.log(
+    `CAI POST /v1/inference model=${CAI_MODEL} run_id=${manifests[0].run_id} manifests=${manifests.length}`,
+  );
   const submitResponse = httpClient
     .sendRequest(runtime, {
       url: `${base}/v1/inference`,
@@ -474,7 +493,7 @@ export async function caiAttest(
   const model = CAI_MODEL;
 
   // Inline (poll) path: submit without a callback, then poll to completion.
-  const inferenceId = submitCaiInference(runtime, manifest, caiApiKey);
+  const inferenceId = submitCaiInference(runtime, [manifest], caiApiKey);
 
   let lastStatus = "queued";
   for (let attempt = 1; attempt <= config.caiPollMaxAttempts; attempt++) {
@@ -579,6 +598,79 @@ export function registerCaiSubmitted(
     .result();
   requireHttpOk(response, `eval/cai-submitted inference_id=${inferenceId}`);
   runtime.log(`registered inference_id=${inferenceId} -> run_id=${runId}`);
+}
+
+/**
+ * Record one model's scored run for a benchmark (handler A, two-model ensemble).
+ * Returns the pair state: complete=false until both models' runs are in, then
+ * complete=true with { model: run_id } for all models so the caller can submit
+ * both manifests to one CAI judge.
+ */
+export function recordPair(
+  runtime: Runtime<Config>,
+  target: PipelineTarget,
+  model: string,
+  runId: string,
+  apiKey: string,
+  modelsTotal: number,
+): { complete: boolean; runs: Record<string, string> } {
+  const base = runtime.config.evalRunnerUrl.replace(/\/$/, "");
+  const body = JSON.stringify({
+    mcp: target.mcp,
+    capability: target.capability,
+    model,
+    run_id: runId,
+    models_total: modelsTotal,
+  });
+  const response = httpClient
+    .sendRequest(runtime, {
+      url: `${base}/eval/pair`,
+      method: "POST",
+      body: encodeHttpBody(body),
+      headers: jsonAuthHeaders(apiKey),
+      timeout: CRE_HTTP_TIMEOUT,
+    })
+    .result();
+  const bodyText = requireHttpOk(response, `eval/pair ${target.mcp}/${target.capability}`);
+  return JSON.parse(bodyText) as { complete: boolean; runs: Record<string, string> };
+}
+
+/** Resolve an MCP name to its onchain agent id via the eval-runner (nameToAgentId). 0 = unresolved. */
+export function fetchAgentId(runtime: Runtime<Config>, mcp: string): number {
+  const base = runtime.config.evalRunnerUrl.replace(/\/$/, "");
+  const response = httpClient
+    .sendRequest(runtime, {
+      url: `${base}/agent-id?mcp=${encodeURIComponent(mcp)}`,
+      method: "GET",
+      timeout: CRE_HTTP_TIMEOUT,
+    })
+    .result();
+  const bodyText = requireHttpOk(response, `agent-id ${mcp}`);
+  const parsed = JSON.parse(bodyText) as { agent_id?: number };
+  return parsed.agent_id ?? 0;
+}
+
+/** Fetch a scored run's manifest from the eval-runner by run_id. */
+export function fetchManifestByRunId(
+  runtime: Runtime<Config>,
+  runId: string,
+  apiKey: string,
+): ScoreManifest {
+  const base = runtime.config.evalRunnerUrl.replace(/\/$/, "");
+  const response = httpClient
+    .sendRequest(runtime, {
+      url: `${base}/eval/runs/${encodeURIComponent(runId)}`,
+      method: "GET",
+      headers: authHeaders(apiKey),
+      timeout: CRE_HTTP_TIMEOUT,
+    })
+    .result();
+  const bodyText = requireHttpOk(response, `eval/runs/${runId}`);
+  const parsed = JSON.parse(bodyText) as { manifest?: ScoreManifest };
+  if (!parsed.manifest) {
+    throw new Error(`run ${runId} has no manifest`);
+  }
+  return parsed.manifest;
 }
 
 /**

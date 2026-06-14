@@ -1,18 +1,17 @@
 import { NextResponse } from "next/server";
 import type { ParsedIntent } from "@/lib/intent";
-import type { EnsDiscoveryResult, ExecutionResult } from "@/lib/pipeline";
+import type { ExecutionResult, MarketplaceMcpResult } from "@/lib/pipeline";
 import {
-  runBlockchainProofStep,
-  runEnsDiscoveryStep,
-  runExecutionStep,
-  runTeeSandboxStep,
+  runMarketplaceMcpStep,
+  runX402PriceStep,
+  runX402SettlementStep,
 } from "@/lib/pipeline-server";
 
-type StepName = "ens-discovery" | "tee-sandbox" | "execute" | "blockchain-proof";
+type StepName = "marketplace-mcp" | "x402-price" | "x402-settlement";
 
 interface StepRequestBody {
   intent?: ParsedIntent;
-  vendor?: EnsDiscoveryResult;
+  vendor?: MarketplaceMcpResult;
   execution?: ExecutionResult;
 }
 
@@ -31,43 +30,41 @@ export async function POST(
 
   try {
     switch (step as StepName) {
-      case "ens-discovery": {
+      case "marketplace-mcp": {
         const intent = body.intent;
         if (!intent?.marketplaceCapability || typeof intent.minReliabilityScore !== "number") {
-          return NextResponse.json({ error: "intent with capability and minReliabilityScore required" }, { status: 400 });
+          return NextResponse.json(
+            { error: "intent with capability and minReliabilityScore required" },
+            { status: 400 },
+          );
         }
-        const result = await runEnsDiscoveryStep(
+        const result = await runMarketplaceMcpStep(
           intent.marketplaceCapability,
           intent.minReliabilityScore,
         );
         return NextResponse.json({ step, status: "complete", detail: result });
       }
 
-      case "tee-sandbox": {
-        if (!body.vendor) {
-          return NextResponse.json({ error: "vendor context required" }, { status: 400 });
-        }
-        const result = await runTeeSandboxStep(body.vendor);
-        return NextResponse.json({ step, status: "complete", detail: result });
-      }
-
-      case "execute": {
+      case "x402-price": {
         const intent = body.intent;
         if (!intent?.marketplaceCapability || typeof intent.minReliabilityScore !== "number") {
           return NextResponse.json({ error: "intent required" }, { status: 400 });
         }
-        const result = await runExecutionStep(
+        const result = await runX402PriceStep(
           intent.marketplaceCapability,
           intent.minReliabilityScore,
         );
         return NextResponse.json({ step, status: "complete", detail: result });
       }
 
-      case "blockchain-proof": {
+      case "x402-settlement": {
         if (!body.execution || !body.vendor) {
-          return NextResponse.json({ error: "execution and vendor context required" }, { status: 400 });
+          return NextResponse.json(
+            { error: "execution and vendor context required" },
+            { status: 400 },
+          );
         }
-        const result = await runBlockchainProofStep(body.execution, body.vendor);
+        const result = await runX402SettlementStep(body.execution, body.vendor);
         return NextResponse.json({ step, status: "complete", detail: result });
       }
 

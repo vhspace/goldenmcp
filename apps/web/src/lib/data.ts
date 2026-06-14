@@ -8,72 +8,37 @@ import {
 
 export type { LeaderboardEntry, VendorProfile };
 
-const ZERO_BYTES32 = `0x${"0".repeat(64)}`;
+const REGISTRY_ABI = parseAbi([
+  "function nextAgentId() view returns (uint256)",
+  "function getRecord(uint256 agentId) view returns ((string name, string mcpEndpoint, string agentUri, string ensName, string lastAttestationId, bytes32 lastTranscriptHash, bool exists))",
+  "function getCapabilityScore(uint256 agentId, string capability) view returns ((uint16 dataScoreBps, uint16 pathScoreBps, uint16 tokenEfficiencyBps, uint16 compositeBps, bool failed, string walrusBlobId))",
+]);
 
-/** Tuple ABI — viem mis-decodes flattened struct returns for getRecord/getCapabilityScore. */
-const REGISTRY_ABI = [
-  {
-    type: "function",
-    name: "nextAgentId",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256" }],
-  },
-  {
-    type: "function",
-    name: "getRecord",
-    stateMutability: "view",
-    inputs: [{ name: "agentId", type: "uint256" }],
-    outputs: [
-      {
-        type: "tuple",
-        name: "",
-        components: [
-          { name: "name", type: "string" },
-          { name: "mcpEndpoint", type: "string" },
-          { name: "agentUri", type: "string" },
-          { name: "ensName", type: "string" },
-          { name: "lastAttestationId", type: "string" },
-          { name: "lastTranscriptHash", type: "bytes32" },
-          { name: "exists", type: "bool" },
-        ],
-      },
-    ],
-  },
-  {
-    type: "function",
-    name: "getCapabilityScore",
-    stateMutability: "view",
-    inputs: [
-      { name: "agentId", type: "uint256" },
-      { name: "capability", type: "string" },
-    ],
-    outputs: [
-      {
-        type: "tuple",
-        name: "",
-        components: [
-          { name: "dataScoreBps", type: "uint16" },
-          { name: "pathScoreBps", type: "uint16" },
-          { name: "tokenEfficiencyBps", type: "uint16" },
-          { name: "compositeBps", type: "uint16" },
-          { name: "failed", type: "bool" },
-          { name: "walrusBlobId", type: "string" },
-        ],
-      },
-    ],
-  },
-] as const;
+function firstEnv(...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+    if (value) return value;
+  }
+  return undefined;
+}
 
 function getClient() {
-  const rpc = process.env.NEXT_PUBLIC_ARC_RPC_URL;
-  if (!rpc) throw new Error("NEXT_PUBLIC_ARC_RPC_URL is not set");
+  const rpc = firstEnv("NEXT_PUBLIC_ARC_RPC_URL", "ARC_RPC_URL", "ARC_TESTNET_RPC_URL");
+  if (!rpc) {
+    throw new Error(
+      "NEXT_PUBLIC_ARC_RPC_URL is not set (also tried ARC_RPC_URL, ARC_TESTNET_RPC_URL)",
+    );
+  }
   return createPublicClient({ transport: http(rpc) });
 }
 
 function getRegistryAddress() {
-  const addr = process.env.NEXT_PUBLIC_REGISTRY_ADDRESS;
-  if (!addr) throw new Error("NEXT_PUBLIC_REGISTRY_ADDRESS is not set");
+  const addr = firstEnv("NEXT_PUBLIC_REGISTRY_ADDRESS", "ARC_REGISTRY_ADDRESS");
+  if (!addr) {
+    throw new Error(
+      "NEXT_PUBLIC_REGISTRY_ADDRESS is not set (also tried ARC_REGISTRY_ADDRESS)",
+    );
+  }
   return addr as `0x${string}`;
 }
 
@@ -97,17 +62,12 @@ export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
     });
     if (!rec.exists) continue;
     for (const cap of CAPABILITIES) {
-      let score;
-      try {
-        score = await client.readContract({
-          address: registry,
-          abi: REGISTRY_ABI,
-          functionName: "getCapabilityScore",
-          args: [id, cap],
-        });
-      } catch {
-        continue;
-      }
+      const score = await client.readContract({
+        address: registry,
+        abi: REGISTRY_ABI,
+        functionName: "getCapabilityScore",
+        args: [id, cap],
+      });
       if (!score.walrusBlobId) continue;
       entries.push({
         mcp: rec.name,
@@ -121,7 +81,7 @@ export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
         ensName: rec.ensName,
         attestationRef: rec.lastAttestationId,
         transcriptHash:
-          rec.lastTranscriptHash && rec.lastTranscriptHash !== ZERO_BYTES32
+          rec.lastTranscriptHash && rec.lastTranscriptHash !== `0x${"0".repeat(64)}`
             ? rec.lastTranscriptHash
             : "",
       });
@@ -152,9 +112,11 @@ export async function fetchManifest(mcp: string, capability: string): Promise<Sc
 }
 
 async function fetchWalrusJson(blobId: string): Promise<Record<string, unknown>> {
-  const aggregator = process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR_URL;
+  const aggregator = firstEnv("NEXT_PUBLIC_WALRUS_AGGREGATOR_URL", "WALRUS_AGGREGATOR_URL");
   if (!aggregator) {
-    throw new Error("NEXT_PUBLIC_WALRUS_AGGREGATOR_URL is not set — cannot fetch Walrus manifests");
+    throw new Error(
+      "NEXT_PUBLIC_WALRUS_AGGREGATOR_URL is not set (also tried WALRUS_AGGREGATOR_URL)",
+    );
   }
   const res = await fetch(`${aggregator}/v1/blobs/${blobId}`);
   if (!res.ok) {
@@ -214,8 +176,8 @@ export async function fetchVendorProfiles(): Promise<VendorProfile[]> {
 }
 
 export async function resolveENS(name: string) {
-  const rpc = process.env.NEXT_PUBLIC_ENS_RPC_URL;
-  if (!rpc) throw new Error("NEXT_PUBLIC_ENS_RPC_URL is not set");
+  const rpc = firstEnv("NEXT_PUBLIC_ENS_RPC_URL", "ENS_RPC_URL");
+  if (!rpc) throw new Error("NEXT_PUBLIC_ENS_RPC_URL is not set (also tried ENS_RPC_URL)");
   const { createPublicClient, http, namehash } = await import("viem");
   const { sepolia } = await import("viem/chains");
   const client = createPublicClient({ chain: sepolia, transport: http(rpc) });
