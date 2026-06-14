@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from goldenmcp_eval_runner.app import app
 from goldenmcp_eval_runner.jobs import eval_jobs
-from goldenmcp_eval_runner.pending_runs import cai_callbacks
+from goldenmcp_eval_runner.pending_runs import cai_callbacks, inference_index
 from goldenmcp_eval_runner.settings import get_settings
 
 
@@ -19,13 +19,46 @@ def _app_module():
     return importlib.import_module("goldenmcp_eval_runner.app")
 
 
+class _FakeProc:
+    def __init__(self, returncode: int, stdout: str = "", stderr: str = ""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def _patch_inspect_subprocess(monkeypatch, *, raw: bytes = b'{"eval": "raw-log-bytes"}') -> None:
+    """Stub the per-eval subprocess + log read (the app spawns inspect_runner)."""
+    import json as _json
+
+    app_module = _app_module()
+    monkeypatch.setattr(
+        app_module.subprocess,
+        "run",
+        lambda *a, **k: _FakeProc(0, stdout=_json.dumps({"log_path": "/tmp/goldenmcp_lifi_quote.eval"})),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "read_inspect_log_file",
+        lambda path: ({"status": "success"}, raw),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "transcript_from_inspect_log",
+        lambda log_data, mcp, capability: __import__(
+            "goldenmcp_inspect.schemas", fromlist=["EvalTranscript"]
+        ).EvalTranscript(mcp=mcp, capability=capability),
+    )
+
+
 @pytest.fixture(autouse=True)
 def clear_stores():
     eval_jobs._jobs.clear()
     cai_callbacks._by_run_id.clear()
+    inference_index._by_inference_id.clear()
     yield
     eval_jobs._jobs.clear()
     cai_callbacks._by_run_id.clear()
+    inference_index._by_inference_id.clear()
 
 
 @pytest.fixture
@@ -174,21 +207,7 @@ def test_webhooks_cai_injects_run_id_from_query(client):
 
 def test_eval_inspect_query_params_backward_compat(client, monkeypatch):
     """Legacy query-param API still accepted alongside JSON body."""
-    app_module = _app_module()
-
-    fake_log = b'{"status":"success","results":{"samples":[]}}'
-
-    def fake_run_inspect(**kwargs):
-        return "/tmp/fake.eval", {"status": "success", "results": {"samples": []}}, fake_log
-
-    monkeypatch.setattr(app_module, "run_inspect_eval", fake_run_inspect)
-    monkeypatch.setattr(
-        app_module,
-        "transcript_from_inspect_log",
-        lambda log_data, mcp, capability: __import__(
-            "goldenmcp_inspect.schemas", fromlist=["EvalTranscript"]
-        ).EvalTranscript(mcp=mcp, capability=capability),
-    )
+    _patch_inspect_subprocess(monkeypatch)
 
     response = client.post(
         "/eval/inspect?mcp=lifi&capability=quote&model=openai/gpt-4o-mini",
@@ -201,11 +220,8 @@ def test_eval_inspect_query_params_backward_compat(client, monkeypatch):
 
 def test_eval_inspect_stores_log_bytes_for_publish(client, monkeypatch):
     app_module = _app_module()
-
     fake_log = b'{"eval": "raw-log-bytes"}'
-
-    def fake_run_inspect(**kwargs):
-        return "/tmp/goldenmcp_lifi_quote.eval", {"status": "success"}, fake_log
+    _patch_inspect_subprocess(monkeypatch, raw=fake_log)
 
     captured: dict = {}
 
@@ -221,14 +237,6 @@ def test_eval_inspect_stores_log_bytes_for_publish(client, monkeypatch):
             walrus_index_blob_id="index-blob",
         )
 
-    monkeypatch.setattr(app_module, "run_inspect_eval", fake_run_inspect)
-    monkeypatch.setattr(
-        app_module,
-        "transcript_from_inspect_log",
-        lambda log_data, mcp, capability: __import__(
-            "goldenmcp_inspect.schemas", fromlist=["EvalTranscript"]
-        ).EvalTranscript(mcp=mcp, capability=capability),
-    )
     monkeypatch.setattr(app_module, "publish_manifest_to_walrus", fake_publish)
 
     inspect_response = client.post(
@@ -400,3 +408,76 @@ def test_eval_publish_legacy_manifest_with_log_bytes(client, monkeypatch):
     assert publish_response.status_code == 202
     _poll_until(client, run_id, "published")
     assert captured["inspect_log_bytes"] == raw
+
+
+def test_cai_submitted_maps_inference_id(client):
+    resp = client.post(
+        "/eval/cai-submitted",
+        json={"inference_id": "inf-xyz", "run_id": "run-xyz"},
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["run_id"] == "run-xyz"
+    assert inference_index.get("inf-xyz") == "run-xyz"
+
+
+def test_cai_submitted_requires_auth(client):
+    resp = client.post("/eval/cai-submitted", json={"inference_id": "i", "run_id": "r"})
+    assert resp.status_code == 401
+
+
+def test_publish_by_inference_id_resolves_run(client, monkeypatch):
+    """Handler B path: publish identified by CAI inference_id, not run_id."""
+    app_module = _app_module()
+
+    captured: dict = {}
+
+    def fake_publish(manifest, **kwargs):
+        captured["attestation"] = manifest.attestation
+        from goldenmcp_inspect.pipeline import WalrusUploadResult
+
+        return WalrusUploadResult(
+            manifest=manifest,
+            walrus_manifest_blob_id="m-blob",
+            walrus_eval_blob_id="e-blob",
+        )
+
+    monkeypatch.setattr(app_module, "publish_manifest_to_walrus", fake_publish)
+
+    score = client.post(
+        "/eval/score",
+        json={"mcp": "lifi", "capability": "quote", "transcript": _sample_transcript_payload()},
+        headers=_auth_headers(),
+    )
+    run_id = score.json()["run_id"]
+
+    # Handler A registers the mapping after submitting to CAI.
+    client.post(
+        "/eval/cai-submitted",
+        json={"inference_id": "inf-b", "run_id": run_id},
+        headers=_auth_headers(),
+    )
+
+    # Handler B publishes using only the inference_id from the CAI status.
+    publish = client.post(
+        "/eval/publish",
+        json={
+            "inference_id": "inf-b",
+            "attestation": {"inference_id": "inf-b", "model": "gemma4", "verdict": "PASS"},
+        },
+        headers=_auth_headers(),
+    )
+    assert publish.status_code == 202
+    final = _poll_until(client, run_id, "published")
+    assert final["mcp"] == "lifi"
+    assert final["capability"] == "quote"
+    assert captured["attestation"].inference_id == "inf-b"
+
+
+def test_publish_unknown_inference_id_404(client):
+    resp = client.post(
+        "/eval/publish",
+        json={"inference_id": "nope"},
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 404

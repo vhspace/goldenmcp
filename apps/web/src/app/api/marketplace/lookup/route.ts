@@ -80,7 +80,7 @@ export async function POST(request: Request) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
       {
-        error: `Marketplace unreachable at ${lookupUrl} — ${msg}. Start: uv run python -m goldenmcp_marketplace`,
+        error: `Marketplace unreachable at ${lookupUrl} — ${msg}. Start: (cd packages/marketplace-mcp-ts && bun src/server.ts)`,
       },
       { status: 502 },
     );

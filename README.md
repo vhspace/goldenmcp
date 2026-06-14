@@ -41,57 +41,68 @@ The marketplace MCP is x402-gated: lookups return HTTP 402 with a USDC price unt
 | x402-gated lookup server (402 challenge, price ladder, settlement) | [`packages/marketplace-mcp/src/goldenmcp_marketplace/app.py`](https://github.com/vhspace/goldenmcp/blob/main/packages/marketplace-mcp/src/goldenmcp_marketplace/app.py) |
 | MCP registry contract (`register`, `updateCapabilityScore`, `recordAttestation`) | [`contracts/mcp-registry/src/MCPRegistry.sol`](https://github.com/vhspace/goldenmcp/blob/main/contracts/mcp-registry/src/MCPRegistry.sol) |
 | Arc deploy script | [`contracts/mcp-registry/script/Deploy.s.sol`](https://github.com/vhspace/goldenmcp/blob/main/contracts/mcp-registry/script/Deploy.s.sol) |
-| x402 lookup agent demo | [`demo/lookup_agent.py`](https://github.com/vhspace/goldenmcp/blob/main/demo/lookup_agent.py) |
+| x402 nanopayments seller + buyer (Circle Gateway, Arc) | [`packages/marketplace-mcp-ts/`](https://github.com/vhspace/goldenmcp/blob/main/packages/marketplace-mcp-ts/) |
 | CRE → Arc registry write (`writeToArc`) | [`workflows/eval-pipeline/src/pipeline.ts`](https://github.com/vhspace/goldenmcp/blob/main/workflows/eval-pipeline/src/pipeline.ts) |
+
+### Sui / Walrus — eval blob storage (not a bounty)
+
+Walrus is the Sui-native decentralized blob store. Every score manifest and raw Inspect `.eval` log is written to Walrus testnet via its publisher/aggregator HTTP API, and ENS + registry records point at the resulting `walrus://<blobId>`. Listed here for completeness even though Sui is not a bounty.
+
+| What | Code |
+|------|------|
+| Walrus publisher/aggregator client (`upload`, `download`, `*_json`) | [`packages/walrus-client/src/goldenmcp_walrus/client.py`](https://github.com/vhspace/goldenmcp/blob/main/packages/walrus-client/src/goldenmcp_walrus/client.py) |
+| `walrus://` fsspec adapter + index (Inspect View log dir) | [`packages/walrus-client/`](https://github.com/vhspace/goldenmcp/tree/main/packages/walrus-client) |
+| Web demo Walrus manifest fetch | [`apps/web/src/lib/data.ts`](https://github.com/vhspace/goldenmcp/blob/main/apps/web/src/lib/data.ts) |
 
 ## Workflow diagrams
 
 ### Eval pipeline (Chainlink CRE)
 
-A CRE cron trigger drives each MCP/capability through scoring, attestation, storage, and the onchain write. CAI and Arc steps degrade gracefully (skipped) when their credentials are absent, so the pipeline is simulatable without secrets.
+A CRE cron trigger fetches the benchmark list, then runs each MCP/capability through scoring, attestation, storage, and the onchain write. The eval-runner calls are async: the pipeline kicks off a run and polls until it reaches `scored` / `published`. CAI and Arc steps are skipped when their credentials are absent, so the pipeline is simulatable without secrets.
 
 ```mermaid
 flowchart TD
-    Cron([CRE cron trigger]) --> Pipeline[runPipeline / eval-pipeline]
-    Pipeline -->|POST /eval/inspect or /eval/score| Runner[eval-runner HTTP]
-    Runner -->|run Inspect eval vs live MCP| MCP[(Web3 MCP server)]
-    Runner -->|score manifest| Pipeline
+    Cron([CRE cron trigger]) -->|GET /benchmarks| Runner[eval-runner HTTP]
+    Runner -->|benchmark list| Loop[runPipeline per benchmark]
 
-    Pipeline --> CAIcheck{has CAI key?}
-    CAIcheck -->|yes| CAI[Confidential AI TEE: /v1/inference + poll or callback]
-    CAIcheck -->|no| SkipCAI[skip attestation]
-    CAI -->|inference_id + verdict + transcript_hash| Pipeline
-    SkipCAI --> Pipeline
+    Loop -->|"POST /eval/inspect, then poll GET /eval/runs/:id until scored"| Score[score manifest]
+    Runner -.->|runs Inspect eval| MCP[(Web3 MCP server)]
 
-    Pipeline -->|POST /eval/publish| Walrus[(Walrus testnet: manifest + raw .eval log)]
-    Walrus -->|blob ids| Pipeline
+    Score --> HasCAI{CAI configured?}
+    HasCAI -->|yes| CAI[Confidential AI TEE<br/>POST /v1/inference + poll/callback]
+    HasCAI -->|no| Pub
+    CAI -->|inference_id + transcript_hash| Pub
 
-    Pipeline --> Arccheck{has registry?}
-    Arccheck -->|yes| Arc[writeToArc: updateCapabilityScore + recordAttestation]
-    Arccheck -->|no| SkipArc[skip onchain write]
+    Pub["POST /eval/publish, then poll until published"] --> Walrus[(Walrus: manifest + raw .eval log)]
+    Walrus --> HasReg{registry set?}
+    HasReg -->|yes| Arc[writeToArc<br/>updateCapabilityScore + recordAttestation]
+    HasReg -->|no| Done([done])
     Arc --> Registry[(MCPRegistry on Arc)]
-    Registry --> ENS[ENS text records point at Walrus + registry]
+    Registry --> ENS[ENS records point at Walrus + registry]
 ```
 
 ### x402 lookup + payment (Arc)
 
-An agent asks the marketplace for the best MCP for a capability. The first call returns a 402 with a USDC price; the agent pays in USDC on Arc and retries with a payment header to receive the top-scoring endpoint.
+An agent asks the marketplace for the best MCP for a capability. The first call returns a 402 with a USDC price (it scales with `min_score`); the agent pays in USDC on Arc and retries with an `X-PAYMENT` header. The marketplace then builds a score index from the registry + Walrus and returns the top match.
 
 ```mermaid
 sequenceDiagram
-    participant Agent as lookup_agent.py
-    participant Market as marketplace-mcp (x402)
+    participant Agent as lookup_agent.ts (GatewayClient)
+    participant Market as marketplace-mcp-ts (x402 nanopayments)
     participant Reg as MCPRegistry (Arc)
     participant Wal as Walrus
 
-    Agent->>Market: POST /tools/lookup {capability, min_score}
-    Market-->>Agent: 402 Payment Required (price_usdc, payee, network=arc-testnet)
-    Agent->>Agent: pay USDC on Arc (price scales with min_score)
+    Agent->>Market: POST /tools/lookup (capability, min_score)
+    Market-->>Agent: 402 Payment Required (price_usdc, payee, network arc-testnet)
+    Note over Agent: pay USDC on Arc
     Agent->>Market: POST /tools/lookup + X-PAYMENT header
-    Market->>Reg: list agents + getCapabilityScore
+
+    Note over Market: _load_index builds the score index
+    Market->>Reg: list_agent_ids + getCapabilityScore per capability
     Market->>Wal: download_json(manifest blob)
-    Reg-->>Market: scores + ens_name + endpoint
-    Market-->>Agent: top MCP {ens_name, mcp_endpoint, composite, attestation_id, transcript_hash}
+    Market->>Market: filter by min_score, sort by composite
+
+    Market-->>Agent: results[] top MCP (ens_name, mcp_endpoint, composite,<br/>attestation_id, transcript_hash) + payment_settled
 ```
 
 ## Setup
@@ -137,11 +148,11 @@ uv run inspect eval goldenmcp/odos_quote --model anthropic/claude-3-5-haiku-2024
 # eval-runner HTTP service (the API the CRE workflow calls)
 uv run python -m goldenmcp_eval_runner
 
-# Marketplace MCP (x402-gated lookup)
-uv run python -m goldenmcp_marketplace
+# Marketplace seller (x402 nanopayments via Circle Gateway, Arc testnet)
+(cd packages/marketplace-mcp-ts && bun install && bun src/server.ts)
 
-# x402 lookup agent demo (needs Arc wallet + x402)
-uv run python demo/lookup_agent.py --capability quote --min-score 0.9
+# x402 buyer agent demo (EOA funded with Arc testnet USDC + native gas)
+cd packages/marketplace-mcp-ts && DEMO_PAYER_PRIVATE_KEY=0x... bun demo/lookup_agent.ts --capability quote --min-score 0.9
 
 # Web demo (leaderboard, eval viewer, ENS resolver)
 cd apps/web && bun install && bun run dev
@@ -172,25 +183,6 @@ Inspect View requires native `.eval` / JSON log files at indexed paths — not s
 Binary fail (composite 0.0) on prompt injection, disallowed tools, or policy violations.
 
 See [docs/scoring.md](docs/scoring.md).
-
-## Agent skills (Chainlink)
-
-Project-local [Chainlink Developer Agent Skills](https://docs.chain.link/resources/chainlink-developer-agent-skills) from `smartcontractkit/chainlink-agent-skills`:
-
-| Path | Agent |
-|------|-------|
-| `.agents/skills/` | Cursor |
-| `.claude/skills/` | Claude Code (this repo) |
-
-Installed skills: CRE, Confidential AI Attester, CCIP, Data Feeds, Data Streams, ACE, VRF. Pin file: `skills-lock.json`.
-
-Invoke explicitly in chat, e.g. `Using /chainlink-cre-skill, …` or `/chainlink-confidential-ai-attester-skill` for CAI attestation work.
-
-Refresh from upstream:
-
-```bash
-npx skills add smartcontractkit/chainlink-agent-skills --skill '*' --agent cursor --agent claude-code -y --copy
-```
 
 ## Structure
 

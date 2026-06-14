@@ -15,6 +15,10 @@ class RunnerSettings(BaseSettings):
     eval_runner_api_key: str | None = None
     cai_webhook_secret: str | None = None
     eval_inspect_timeout: int = 600
+    # Per-sample wall cap passed to Inspect (time_limit); bounds a slow/unreachable
+    # MCP so the run finishes-and-scores instead of stalling until the subprocess
+    # kill at eval_inspect_timeout. Keep < eval_inspect_timeout and < CRE poll budget.
+    eval_inspect_time_limit: int = 150
     eval_inspect_model: str = "together/google/gemma-4-31B-it"
 
 

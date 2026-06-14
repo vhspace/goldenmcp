@@ -1,6 +1,5 @@
 .env
-.env.local
-apps/web/.env.local
+.env.copy
 .venv/
 __pycache__/
 *.pyc
@@ -18,6 +17,8 @@ contracts/mcp-registry/broadcast/
 *.eval
 .DS_Store
 .worktrees/
+.claude/worktrees/
+t/
 # Terraform eval-runner (local state; may contain droplet metadata)
 infra/terraform/eval-runner/.terraform/
 infra/terraform/eval-runner/*.tfstate

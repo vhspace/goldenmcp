@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import base64
-import concurrent.futures
+import json
 import logging
+import subprocess
+import sys
 import threading
 import uuid
 from pathlib import Path
@@ -15,9 +17,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from goldenmcp_eval_runner.auth import require_api_key, require_cai_webhook_secret
-from goldenmcp_eval_runner.inspect_runner import run_inspect_eval
+from goldenmcp_eval_runner.inspect_logs import read_inspect_log_file
 from goldenmcp_eval_runner.jobs import EvalJob, eval_jobs, JobStatus
-from goldenmcp_eval_runner.pending_runs import cai_callbacks
+from goldenmcp_eval_runner.pending_runs import cai_callbacks, inference_index
 from goldenmcp_eval_runner.settings import RunnerSettings, get_settings
 from goldenmcp_inspect.benchmarks import list_benchmarks, load_benchmark
 from goldenmcp_inspect.manifest import transcript_from_inspect_log
@@ -70,7 +72,9 @@ class EvalResponse(BaseModel):
 
 
 class PublishRequest(BaseModel):
-    run_id: str
+    # Identify the run by run_id, or by the CAI inference_id (resolved via the index).
+    run_id: str | None = None
+    inference_id: str | None = None
     attestation: dict[str, Any] | None = None
     manifest: dict[str, Any] | None = None
     inspect_log_bytes_b64: str | None = None
@@ -78,10 +82,19 @@ class PublishRequest(BaseModel):
 
 class PublishResponse(BaseModel):
     run_id: str
+    mcp: str
+    capability: str
     manifest: dict[str, Any]
     walrus_manifest_blob_id: str
     walrus_eval_blob_id: str
     walrus_index_blob_id: str | None = None
+
+
+class CaiSubmittedRequest(BaseModel):
+    """Handler A registers the CAI inference_id -> run_id mapping after submitting."""
+
+    inference_id: str
+    run_id: str
 
 
 class CaiWebhookBody(BaseModel):
@@ -183,13 +196,33 @@ def _fail_job(run_id: str, error: str) -> None:
     logger.error("eval job failed run_id=%s error=%s", run_id, error)
 
 
+def _parse_log_path(stdout: str) -> str:
+    """Extract the log path from the inspect_runner subprocess stdout.
+
+    The child prints {"log_path": ...} as its last line, but scan lines in reverse
+    for the first valid JSON object carrying `log_path` so a stray trailing print
+    (atexit/thread) can't break parsing. Raises ValueError if none found.
+    """
+    for line in reversed((stdout or "").strip().splitlines()):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and obj.get("log_path"):
+            return obj["log_path"]
+    raise ValueError("no log_path JSON line in subprocess stdout")
+
+
 def _run_inspect_job(run_id: str, request: InspectEvalRequest, settings: RunnerSettings) -> None:
     eval_jobs.update(run_id, status=JobStatus.RUNNING)
     model = request.model or settings.eval_inspect_model
     repo_root = _repo_root()
     log_dir = repo_root / "logs"
     logger.info(
-        "background in-process inspect mcp=%s capability=%s model=%s timeout=%s run_id=%s",
+        "background subprocess inspect mcp=%s capability=%s model=%s timeout=%s run_id=%s",
         request.mcp,
         request.capability,
         model,
@@ -197,18 +230,36 @@ def _run_inspect_job(run_id: str, request: InspectEvalRequest, settings: RunnerS
         run_id,
     )
 
+    # Run each eval in its OWN subprocess. Inspect's eval() sets up process-global
+    # anyio/display/async-fs state (eval.py: run_task_app -> anyio.run); a second
+    # in-process call in the long-lived uvicorn worker hangs at startup. A fresh
+    # process per eval (also fresh MCP client + HTTP pool) sidesteps that entirely.
+    cmd = [
+        sys.executable,
+        "-m",
+        "goldenmcp_eval_runner.inspect_runner",
+        "--mcp",
+        request.mcp,
+        "--capability",
+        request.capability,
+        "--model",
+        model,
+        "--repo-root",
+        str(repo_root),
+        "--log-dir",
+        str(log_dir),
+        "--time-limit",
+        str(settings.eval_inspect_time_limit),
+    ]
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(
-                run_inspect_eval,
-                mcp=request.mcp,
-                capability=request.capability,
-                model=model,
-                repo_root=repo_root,
-                log_dir=log_dir,
-            )
-            log_path, log_data, raw = future.result(timeout=settings.eval_inspect_timeout)
-    except concurrent.futures.TimeoutError:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            timeout=settings.eval_inspect_timeout,
+        )
+    except subprocess.TimeoutExpired:
         logger.error(
             "inspect eval timed out after %ss mcp=%s capability=%s run_id=%s",
             settings.eval_inspect_timeout,
@@ -216,29 +267,34 @@ def _run_inspect_job(run_id: str, request: InspectEvalRequest, settings: RunnerS
             request.capability,
             run_id,
         )
-        _fail_job(
-            run_id,
-            f"inspect eval timed out after {settings.eval_inspect_timeout}s",
-        )
+        _fail_job(run_id, f"inspect eval timed out after {settings.eval_inspect_timeout}s")
         return
-    except RuntimeError as exc:
+
+    if proc.returncode != 0:
+        stderr_tail = (proc.stderr or "").strip()[-2000:]
         logger.error(
-            "inspect eval failed mcp=%s capability=%s run_id=%s error=%s",
+            "inspect eval subprocess failed rc=%s mcp=%s capability=%s run_id=%s stderr=%s",
+            proc.returncode,
             request.mcp,
             request.capability,
             run_id,
-            exc,
+            stderr_tail,
         )
-        _fail_job(run_id, str(exc))
+        _fail_job(run_id, f"inspect eval failed (rc={proc.returncode}): {stderr_tail or 'no stderr'}")
         return
+
+    try:
+        log_path = _parse_log_path(proc.stdout)
+        log_data, raw = read_inspect_log_file(log_path)
     except Exception as exc:
         logger.exception(
-            "inspect eval unexpected error mcp=%s capability=%s run_id=%s",
+            "inspect eval output unparseable mcp=%s capability=%s run_id=%s stdout=%s",
             request.mcp,
             request.capability,
             run_id,
+            (proc.stdout or "")[-500:],
         )
-        _fail_job(run_id, f"inspect eval failed: {exc}")
+        _fail_job(run_id, f"inspect eval produced no readable log: {exc}")
         return
 
     transcript = transcript_from_inspect_log(log_data, request.mcp, request.capability)
@@ -440,7 +496,7 @@ def trigger_inspect_eval(
     model: str | None = Query(None),
     settings: RunnerSettings = Depends(get_settings),
 ):
-    """Queue in-process Inspect eval; poll GET /eval/runs/{run_id} until scored or failed."""
+    """Queue a subprocess Inspect eval; poll GET /eval/runs/{run_id} until scored or failed."""
     if body is not None:
         request = body
     elif mcp and capability:
@@ -478,7 +534,22 @@ def trigger_inspect_eval(
     dependencies=[Depends(require_api_key)],
 )
 def publish_eval(request: PublishRequest):
-    """Queue Walrus upload for a scored run; poll GET /eval/runs/{run_id} until published or failed."""
+    """Queue Walrus upload for a scored run; poll GET /eval/runs/{run_id} until published or failed.
+
+    The run is identified by run_id, or by the CAI inference_id (resolved via the
+    inference index — handler B only has the CAI status, not the run_id).
+    """
+    if not request.run_id and request.inference_id:
+        resolved = inference_index.get(request.inference_id)
+        if resolved is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no run mapped to inference_id={request.inference_id!r} — was /eval/cai-submitted called?",
+            )
+        request.run_id = resolved
+    if not request.run_id:
+        raise HTTPException(status_code=400, detail="run_id or inference_id required")
+
     job = _resolve_publish_job(request)
     if job is None:
         raise HTTPException(
@@ -491,6 +562,8 @@ def publish_eval(request: PublishRequest):
             raise HTTPException(status_code=500, detail="published job missing walrus fields")
         return PublishResponse(
             run_id=job.run_id,
+            mcp=job.mcp,
+            capability=job.capability,
             manifest=job.manifest.to_public_dict(),
             walrus_manifest_blob_id=job.walrus_manifest_blob_id,
             walrus_eval_blob_id=job.walrus_eval_blob_id,
@@ -540,6 +613,26 @@ def publish_eval(request: PublishRequest):
         status_code=202,
         content=JobAcceptedResponse(run_id=request.run_id, status=JobStatus.PUBLISHING).model_dump(),
     )
+
+
+@app.post(
+    "/eval/cai-submitted",
+    dependencies=[Depends(require_api_key)],
+)
+def cai_submitted(request: CaiSubmittedRequest):
+    """Record a CAI inference_id -> run_id mapping (handler A, right after submit).
+
+    The CRE HTTP-trigger payload carries only the CAI status, so the inference id
+    in that status is the only handle back to the run. /eval/publish resolves it.
+    """
+    inference_index.put(request.inference_id, request.run_id)
+    logger.info(
+        "cai-submitted inference_id=%s run_id=%s mapped=%d",
+        request.inference_id,
+        request.run_id,
+        len(inference_index),
+    )
+    return {"status": "ok", "inference_id": request.inference_id, "run_id": request.run_id}
 
 
 @app.post(
