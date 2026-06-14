@@ -70,7 +70,7 @@ function ToolResultCard({ events }: { events: SseEvent[] }) {
   );
 }
 
-export function ChatConcierge() {
+export function ChatConcierge({ embedded = false }: { embedded?: boolean }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -162,20 +162,16 @@ export function ChatConcierge() {
     [loading, messages],
   );
 
-  return (
-    <section
-      style={{
-        marginBottom: "2rem",
-        padding: "1.25rem",
-        background: "#111",
-        border: "1px solid #333",
-        borderRadius: "10px",
-      }}
-    >
-      <h2 style={{ margin: "0 0 0.5rem", fontSize: "1.35rem" }}>GoldenMCP Concierge</h2>
-      <p style={{ color: "#888", margin: "0 0 1rem", fontSize: "0.9rem" }}>
-        Natural-language MCP discovery — paid marketplace lookup via x402 USDC on Arc.
-      </p>
+  const body = (
+    <>
+      {!embedded && (
+        <>
+          <h2 style={{ margin: "0 0 0.5rem", fontSize: "1.35rem" }}>GoldenMCP Concierge</h2>
+          <p style={{ color: "#888", margin: "0 0 1rem", fontSize: "0.9rem" }}>
+            Natural-language MCP discovery — paid marketplace lookup via x402 USDC on Arc.
+          </p>
+        </>
+      )}
 
       <div
         style={{
@@ -285,6 +281,35 @@ export function ChatConcierge() {
           Send
         </button>
       </form>
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div
+        style={{
+          padding: "1rem",
+          background: "#121214",
+          border: "1px solid #1f1f22",
+          borderRadius: "12px",
+        }}
+      >
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <section
+      style={{
+        marginBottom: "2rem",
+        padding: "1.25rem",
+        background: "#111",
+        border: "1px solid #333",
+        borderRadius: "10px",
+      }}
+    >
+      {body}
     </section>
   );
 }
