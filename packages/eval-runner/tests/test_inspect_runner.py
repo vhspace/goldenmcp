@@ -214,3 +214,60 @@ def test_main_returns_nonzero_and_stderr_on_failure(monkeypatch, tmp_path, capsy
     )
     assert rc == 1
     assert "kaboom" in capsys.readouterr().err
+
+
+def test_resolve_model_routing_anthropic_via_do_proxy():
+    routing = inspect_runner.resolve_model_routing(
+        "anthropic/anthropic-claude-haiku-4.5",
+        anthropic_base_url="https://inference.do-ai.run",
+        do_inference_key="do-key-123",
+    )
+    assert routing["model_base_url"] == "https://inference.do-ai.run"
+    assert routing["model_args"] == {"api_key": "do-key-123"}
+
+
+def test_resolve_model_routing_anthropic_without_do_creds_is_empty():
+    # No DO creds → direct Anthropic key path (no extras).
+    assert inspect_runner.resolve_model_routing(
+        "anthropic/anthropic-claude-haiku-4.5",
+        anthropic_base_url="",
+        do_inference_key="",
+    ) == {}
+
+
+def test_resolve_model_routing_together_is_empty():
+    assert inspect_runner.resolve_model_routing(
+        "together/google/gemma-4-31B-it",
+        anthropic_base_url="https://inference.do-ai.run",
+        do_inference_key="do-key-123",
+    ) == {}
+
+
+def test_main_strips_leaked_anthropic_env_and_routes(monkeypatch, tmp_path):
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://inference.do-ai.run")
+    monkeypatch.setenv("DO_INFERENCE_KEY", "do-key-123")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "leaked")
+    monkeypatch.setenv("ANTHROPIC_DEFAULT_HAIKU_MODEL", "leaked-model")
+
+    captured: dict = {}
+
+    def fake_run(**kwargs):
+        # Snapshot env + routing as the eval would see them.
+        captured["routing"] = kwargs.get("routing")
+        captured["env_after"] = {v: __import__("os").environ.get(v) for v in inspect_runner.LEAKABLE_ANTHROPIC_ENV}
+        return ("/tmp/x.eval", {"status": "success"}, b"raw")
+
+    monkeypatch.setattr(inspect_runner, "run_inspect_eval", fake_run)
+    rc = inspect_runner.main(
+        [
+            "--mcp", "lifi", "--capability", "quote",
+            "--model", "anthropic/anthropic-claude-haiku-4.5",
+            "--repo-root", str(tmp_path),
+        ]
+    )
+    assert rc == 0
+    # Leaked ambient vars are stripped before the eval...
+    assert all(v is None for v in captured["env_after"].values())
+    # ...and routing still carries the captured DO proxy values.
+    assert captured["routing"]["model_base_url"] == "https://inference.do-ai.run"
+    assert captured["routing"]["model_args"] == {"api_key": "do-key-123"}

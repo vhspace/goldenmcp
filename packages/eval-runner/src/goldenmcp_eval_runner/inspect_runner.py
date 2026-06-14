@@ -6,6 +6,7 @@ across consecutive runs."""
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -13,10 +14,44 @@ from goldenmcp_eval_runner.inspect_logs import find_inspect_log_for_benchmark, r
 
 logger = logging.getLogger(__name__)
 
+# Ambient Anthropic env vars that can hijack the provider call (e.g. a Claude Code
+# shell sets ANTHROPIC_BASE_URL to its own gateway). Stripped in main() so DO-proxy
+# routing is driven only by the explicit values we pass — same rationale as the
+# `env -u ...` in scripts/run_eval.sh.
+LEAKABLE_ANTHROPIC_ENV = (
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+)
+
 
 def inspect_task_spec(mcp: str, capability: str) -> str:
     """Return Inspect registry task name (matches @task-decorated function in goldenmcp_inspect.tasks)."""
     return f"{mcp.replace('-', '_')}_{capability.replace('-', '_')}"
+
+
+def resolve_model_routing(
+    model: str,
+    *,
+    anthropic_base_url: str | None = None,
+    do_inference_key: str | None = None,
+) -> dict[str, Any]:
+    """Per-model Inspect `eval()` extras (base_url/api_key), mirroring run_eval.sh.
+
+    Anthropic models route through the DigitalOcean inference proxy when both
+    ANTHROPIC_BASE_URL and DO_INFERENCE_KEY are available — Inspect's env-var auth
+    mishandles the proxy, so base_url + api_key must be passed explicitly. Together
+    and other models read their key from env (TOGETHER_API_KEY) and need no extras.
+    Falls back to {} for an Anthropic model when DO creds are absent (direct key).
+    """
+    base_url = anthropic_base_url if anthropic_base_url is not None else os.environ.get("ANTHROPIC_BASE_URL", "")
+    key = do_inference_key if do_inference_key is not None else os.environ.get("DO_INFERENCE_KEY", "")
+    if model.startswith("anthropic/") and base_url and key:
+        return {"model_base_url": base_url, "model_args": {"api_key": key}}
+    return {}
 
 
 def run_inspect_eval(
@@ -27,6 +62,7 @@ def run_inspect_eval(
     repo_root: Path,
     log_dir: Path | None = None,
     time_limit: int | None = None,
+    routing: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any], bytes]:
     """Run Inspect eval (one process); return (log_path, log_data, raw_bytes).
 
@@ -59,6 +95,8 @@ def run_inspect_eval(
     )
     if time_limit is not None and time_limit > 0:
         eval_kwargs["time_limit"] = time_limit
+    if routing:
+        eval_kwargs.update(routing)
     eval_logs = eval(**eval_kwargs)
 
     if not eval_logs:
@@ -105,6 +143,20 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.WARNING)
+
+    # Capture DO-proxy routing values, then strip the ambient Anthropic env vars so a
+    # leaked ANTHROPIC_BASE_URL/key can't hijack the provider call. Routing is then
+    # driven only by these explicit values (resolve_model_routing).
+    anthropic_base_url = os.environ.get("ANTHROPIC_BASE_URL", "")
+    do_inference_key = os.environ.get("DO_INFERENCE_KEY", "")
+    for var in LEAKABLE_ANTHROPIC_ENV:
+        os.environ.pop(var, None)
+    routing = resolve_model_routing(
+        args.model,
+        anthropic_base_url=anthropic_base_url,
+        do_inference_key=do_inference_key,
+    )
+
     try:
         log_path, _, _ = run_inspect_eval(
             mcp=args.mcp,
@@ -113,6 +165,7 @@ def main(argv: list[str] | None = None) -> int:
             repo_root=Path(args.repo_root),
             log_dir=Path(args.log_dir) if args.log_dir else None,
             time_limit=args.time_limit,
+            routing=routing,
         )
     except Exception as exc:  # noqa: BLE001 — surface as stderr + non-zero exit
         print(str(exc), file=sys.stderr)
