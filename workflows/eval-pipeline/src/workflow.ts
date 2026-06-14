@@ -11,10 +11,12 @@ import {
 } from "@chainlink/cre-sdk";
 import { bytesToString } from "viem";
 import {
+  fetchManifestByRunId,
   getCaiApiKey,
   getEvalRunnerApiKey,
   parseCaiAttestation,
   publishByInferenceId,
+  recordPair,
   registerCaiSubmitted,
   requireCaiAttestationFields,
   runEvalScore,
@@ -50,18 +52,45 @@ function filterBenchmarks(
  * the manifest to CAI with cre_callback = this workflow's HTTP trigger, and return.
  * CAI's completion POST starts a fresh HTTP-trigger execution (handler B).
  */
-async function submitForAttestation(runtime: Runtime<Config>, target: PipelineTarget): Promise<string> {
+async function submitForAttestation(
+  runtime: Runtime<Config>,
+  target: PipelineTarget,
+  model?: string,
+  modelsTotal = 1,
+): Promise<string> {
   const config = runtime.config;
   const evalRunnerApiKey = getEvalRunnerApiKey(runtime);
-  const scored = await runEvalScore(runtime, target, evalRunnerApiKey);
+  const scored = await runEvalScore(runtime, target, evalRunnerApiKey, model);
 
   const caiApiKey = getCaiApiKey(runtime);
   if (!caiApiKey) {
     throw new Error("CHAINLINK_CAI_API_KEY secret required for callback (async) attestation mode");
   }
-  // CAI POSTs only its status (no URL/query) to the trigger, so we register the
-  // inference_id -> run_id mapping with the eval-runner; handler B resolves it.
-  const inferenceId = submitCaiInference(runtime, scored.manifest, caiApiKey, config.creCallbackUrl);
+
+  // Ensemble: record this model's run; only submit to CAI once all models for
+  // the benchmark are in, sending every model's manifest to one judge that sums.
+  if (modelsTotal > 1) {
+    const pair = recordPair(runtime, target, model ?? "default", scored.run_id, evalRunnerApiKey, modelsTotal);
+    if (!pair.complete) {
+      runtime.log(
+        `${target.mcp}/${target.capability} model=${model} scored (run_id=${scored.run_id}) — waiting for the other model`,
+      );
+      return `${target.mcp}/${target.capability}:${model}:waiting`;
+    }
+    const runIds = Object.values(pair.runs);
+    const manifests = runIds.map((rid) => fetchManifestByRunId(runtime, rid, evalRunnerApiKey));
+    // The callback resolves by inference_id -> one of the run_ids; publish that one.
+    const primaryRunId = scored.run_id;
+    const inferenceId = submitCaiInference(runtime, manifests, caiApiKey, config.creCallbackUrl);
+    registerCaiSubmitted(runtime, inferenceId, primaryRunId, evalRunnerApiKey);
+    runtime.log(
+      `${target.mcp}/${target.capability} pair complete (${manifests.length} models) -> CAI inference=${inferenceId} primary_run=${primaryRunId}`,
+    );
+    return `${target.mcp}/${target.capability}:attested:${inferenceId}`;
+  }
+
+  // Single-model path: submit straight away.
+  const inferenceId = submitCaiInference(runtime, [scored.manifest], caiApiKey, config.creCallbackUrl);
   registerCaiSubmitted(runtime, inferenceId, scored.run_id, evalRunnerApiKey);
   runtime.log(
     `submitForAttestation ${target.mcp}/${target.capability} run_id=${scored.run_id} inference_id=${inferenceId}`,
@@ -70,7 +99,14 @@ async function submitForAttestation(runtime: Runtime<Config>, target: PipelineTa
 }
 
 /** Ask the eval-runner for the next benchmark in its round-robin (one per fire). */
-function fetchNextBenchmark(runtime: Runtime<Config>): { mcp: string; capability: string; index: number; total: number } {
+function fetchNextBenchmark(runtime: Runtime<Config>): {
+  mcp: string;
+  capability: string;
+  model?: string;
+  models_total?: number;
+  index: number;
+  total: number;
+} {
   const resp = httpClient
     .sendRequest(runtime, {
       url: `${runtime.config.evalRunnerUrl.replace(/\/$/, "")}/benchmarks/next`,
@@ -91,13 +127,15 @@ async function onCronTrigger(runtime: Runtime<Config>): Promise<string> {
   // cycling through all of them across successive fires. Keeps each execution
   // under the CRE per-workflow HTTP-call cap and gives every benchmark its own
   // attested run. Enabled with rotateBenchmarks=true (the droplet/full target).
-  let items: Array<{ mcp: string; capability: string }>;
+  let items: Array<{ mcp: string; capability: string; model?: string; modelsTotal?: number }>;
   if (config.rotateBenchmarks) {
     const next = fetchNextBenchmark(runtime);
     runtime.log(
-      `rotateBenchmarks — fire runs ${next.mcp}/${next.capability} (#${next.index + 1}/${next.total})`,
+      `rotateBenchmarks — fire runs ${next.mcp}/${next.capability} model=${next.model ?? "(default)"} (#${next.index + 1}/${next.total})`,
     );
-    items = [{ mcp: next.mcp, capability: next.capability }];
+    items = [
+      { mcp: next.mcp, capability: next.capability, model: next.model, modelsTotal: next.models_total },
+    ];
   } else {
     const benchmarksResponse = httpClient
       .sendRequest(runtime, {
@@ -146,7 +184,7 @@ async function onCronTrigger(runtime: Runtime<Config>): Promise<string> {
       agentId: config.defaultAgentId,
     };
     if (asyncMode) {
-      results.push(await submitForAttestation(runtime, target));
+      results.push(await submitForAttestation(runtime, target, bench.model, bench.modelsTotal ?? 1));
     } else {
       const result = await runPipeline(runtime, target);
       results.push(`${bench.mcp}/${bench.capability}:${result.manifest.composite}`);

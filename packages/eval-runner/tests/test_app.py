@@ -11,7 +11,12 @@ from fastapi.testclient import TestClient
 
 from goldenmcp_eval_runner.app import app
 from goldenmcp_eval_runner.jobs import eval_jobs
-from goldenmcp_eval_runner.pending_runs import benchmark_cursor, cai_callbacks, inference_index
+from goldenmcp_eval_runner.pending_runs import (
+    benchmark_cursor,
+    cai_callbacks,
+    inference_index,
+    manifest_pairs,
+)
 from goldenmcp_eval_runner.settings import get_settings
 
 
@@ -56,6 +61,7 @@ def clear_stores():
     cai_callbacks._by_run_id.clear()
     inference_index._by_inference_id.clear()
     benchmark_cursor._index = 0
+    manifest_pairs._pending.clear()
     yield
     eval_jobs._jobs.clear()
     cai_callbacks._by_run_id.clear()
@@ -112,18 +118,47 @@ def test_benchmarks_no_auth(client):
     assert "benchmarks" in response.json()
 
 
-def test_benchmarks_next_round_robins(client):
-    total = len(client.get("/benchmarks").json()["benchmarks"])
-    assert total > 0
-    seen = []
-    for i in range(total):
+def test_benchmarks_next_round_robins_over_model_pairs(client):
+    n = len(client.get("/benchmarks").json()["benchmarks"])
+    assert n > 0
+    first = client.get("/benchmarks/next").json()
+    m = first["models_total"]
+    assert m >= 2  # two open-weight models
+    total = n * m
+    assert first["total"] == total and first["index"] == 0 and first["model_index"] == 0
+
+    seen = [(first["mcp"], first["capability"], first["model"])]
+    for i in range(1, total):
         body = client.get("/benchmarks/next").json()
         assert body["index"] == i
-        assert body["total"] == total
-        seen.append((body["mcp"], body["capability"]))
-    # One full cycle covers every benchmark exactly once, then wraps to index 0.
+        seen.append((body["mcp"], body["capability"], body["model"]))
+
+    # Every (benchmark, model) pair appears exactly once; a benchmark's two models
+    # are adjacent (same mcp/capability on consecutive fires), then it wraps.
     assert len(set(seen)) == total
+    assert seen[0][:2] == seen[1][:2] and seen[0][2] != seen[1][2]
     assert client.get("/benchmarks/next").json()["index"] == 0
+
+
+def test_eval_pair_completes_on_second_model(client):
+    r1 = client.post(
+        "/eval/pair",
+        json={"mcp": "lifi", "capability": "quote", "model": "m1", "run_id": "run-1", "models_total": 2},
+        headers=_auth_headers(),
+    ).json()
+    assert r1["complete"] is False
+    r2 = client.post(
+        "/eval/pair",
+        json={"mcp": "lifi", "capability": "quote", "model": "m2", "run_id": "run-2", "models_total": 2},
+        headers=_auth_headers(),
+    ).json()
+    assert r2["complete"] is True
+    assert r2["runs"] == {"m1": "run-1", "m2": "run-2"}
+
+
+def test_eval_pair_requires_auth(client):
+    resp = client.post("/eval/pair", json={"mcp": "x", "capability": "y", "model": "m", "run_id": "r"})
+    assert resp.status_code == 401
 
 
 def test_eval_score_rejects_when_api_key_unset(monkeypatch):
