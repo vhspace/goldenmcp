@@ -72,6 +72,29 @@ def test_publish_manifest_to_walrus_sets_blob_ids():
     assert result.walrus_eval_blob_id == result.manifest.walrus_blob_id
 
 
+def test_publish_ignores_local_inspect_log_path_for_walrus_ref():
+    """A local filesystem inspect_log_path must not become the stored walrus ref.
+
+    The eval-runner passes the on-disk .eval path (e.g. /opt/.../run.eval); the
+    stored walrus_blob_id must be a derived walrus:// path, not that local path.
+    """
+    transcript = _sample_transcript()
+    manifest = score_transcript_to_manifest(transcript, run_id="local-path-unit")
+    client = InMemoryWalrusClient()
+    fs = WalrusFileSystem(client=client, index=WalrusIndex())
+
+    result = publish_manifest_to_walrus(
+        manifest,
+        transcript=transcript,
+        walrus=client,
+        filesystem=fs,
+        inspect_log_path="/opt/goldenmcp/logs/2026-01-01T00-00-00_lifi-quote_abc.eval",
+    )
+
+    assert result.manifest.walrus_blob_id.startswith("walrus://")
+    assert "/opt/goldenmcp/logs/" not in result.manifest.walrus_blob_id
+
+
 def test_post_eval_walrus_upload_delegates_to_score_and_publish():
     client = InMemoryWalrusClient()
     fs = WalrusFileSystem(client=client, index=WalrusIndex())
