@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
-import { DEMO_PROMPTS } from "@/lib/intent";
+import { CHAT_DEMO_PROMPTS } from "@/lib/intent";
 import { parseSseChunk, type SseEvent } from "@/lib/chat-sse";
 
 interface ChatMessage {
@@ -185,7 +185,7 @@ export function ChatConcierge() {
           marginBottom: "1rem",
         }}
       >
-        {DEMO_PROMPTS.map((p) => (
+        {CHAT_DEMO_PROMPTS.map((p) => (
           <button
             key={p.id}
             type="button"
@@ -219,7 +219,7 @@ export function ChatConcierge() {
         }}
       >
         {messages.length === 0 && (
-          <p style={{ color: "#666", margin: 0 }}>Ask for a quote, route, or swap MCP…</p>
+          <p style={{ color: "#666", margin: 0 }}>Ask for an ETH/USDC quote or marketplace lookup…</p>
         )}
         {messages.map((m, i) => (
           <div key={i} style={{ marginBottom: "1rem" }}>
@@ -259,7 +259,7 @@ export function ChatConcierge() {
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Find the best quote MCP with reliability ≥ 0.9"
+          placeholder="Quote 0.001 ETH to USDC on Base via LI.FI"
           disabled={loading}
           style={{
             flex: 1,
