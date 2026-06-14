@@ -7,6 +7,7 @@ import {
   marketplaceUrl,
   registryAddress,
   walrusAggregatorUrl,
+  webAgentUrl,
 } from "../src/lib/web-env";
 
 const ORIGINAL_ENV = { ...process.env };
@@ -65,5 +66,18 @@ describe("web-env (GH #106 Vercel)", () => {
     delete process.env.NEXT_PUBLIC_ENS_RPC_URL;
     delete process.env.ENS_RPC_URL;
     expect(ensRpcUrl()).toContain("sepolia");
+  });
+
+  test("webAgentUrl prefers WEB_AGENT_PUBLIC_URL for production", () => {
+    process.env.WEB_AGENT_PUBLIC_URL = "https://agent.example.com/";
+    expect(webAgentUrl()).toBe("https://agent.example.com");
+  });
+
+  test("webAgentUrl builds from host/port locally", () => {
+    delete process.env.WEB_AGENT_URL;
+    delete process.env.WEB_AGENT_PUBLIC_URL;
+    process.env.WEB_AGENT_HOST = "127.0.0.1";
+    process.env.WEB_AGENT_PORT = "8092";
+    expect(webAgentUrl()).toBe("http://127.0.0.1:8092");
   });
 });

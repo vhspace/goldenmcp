@@ -1,6 +1,7 @@
 import { fetchVendorProfiles } from "@/lib/data";
 import { VendorPerformanceCard } from "@/components/VendorPerformanceCard";
 import { ExecutionSandbox } from "@/components/ExecutionSandbox";
+import { ChatConcierge } from "@/components/ChatConcierge";
 import { GOLDEN_SCORE_THRESHOLDS, METER_THRESHOLDS, type VendorProfile } from "@/lib/vendors";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +25,8 @@ export default async function DemoPage() {
           K=3 Golden Scores from Arc + Walrus.
         </p>
       </header>
+
+      <ChatConcierge />
 
       <ExecutionSandbox />
 
