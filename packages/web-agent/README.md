@@ -30,6 +30,26 @@ Requires `packages/marketplace-mcp-ts` `node_modules` (`bun install` there first
 
 `WEB_AGENT_MODEL` defaults to `anthropic/claude-sonnet-4-20250514`.
 
+## Vendor MCP smoke (no evals)
+
+Direct CLI probe (`list_tools` + read-only call per vendor):
+
+```bash
+# From repo root (worktree), with .env sourced
+uv run goldenmcp-smoke-mcps
+```
+
+Requires `LIFI_MCP_URL`, `ONEINCH_MCP_URL`, `WALLET_PRIVATE_KEY` (odos), and a built
+`KYBERSWAP_MCP_PATH` (see `scripts/install-mcps.sh`).
+
+Concierge chat smoke (Sonnet calls `probe_vendor_mcp` for each vendor):
+
+```bash
+curl -sN -X POST http://127.0.0.1:8092/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"Smoke: probe_vendor_mcp for lifi, 1inch, odos, jupiter, kyberswap."}'
+```
+
 ## See also
 
 - Plan: `docs/plans/2026-06-13-web-concierge-agent.md`

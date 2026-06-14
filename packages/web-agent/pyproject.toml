@@ -9,12 +9,14 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "pydantic-settings>=2.0",
+    "mcp>=1.23.0",
     "goldenmcp-inspect-web3",
 ]
 
 [project.scripts]
 goldenmcp-mcp-manifest = "goldenmcp_web_agent.cli:emit_manifest"
 goldenmcp-web-agent = "goldenmcp_web_agent.runner:main"
+goldenmcp-smoke-mcps = "goldenmcp_web_agent.smoke:main"
 
 [build-system]
 requires = ["hatchling"]

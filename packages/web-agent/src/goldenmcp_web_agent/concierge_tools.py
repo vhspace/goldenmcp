@@ -98,7 +98,7 @@ def run_paid_lookup_subprocess(capability: str, min_score: float) -> dict[str, A
 
     cmd = [
         _bun_executable(),
-        str(script),
+        "demo/lookup_agent.ts",
         "--capability",
         capability,
         "--min-score",
@@ -230,6 +230,56 @@ def anthropic_tool_definitions() -> list[dict[str, Any]]:
                 "required": ["text"],
             },
         },
+        {
+            "name": "list_vendor_mcp_tools",
+            "description": (
+                "List tools on a vendor MCP (lifi, 1inch, odos, jupiter, kyberswap). "
+                "Use after marketplace lookup returns a vendor."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "vendor": {
+                        "type": "string",
+                        "enum": ["lifi", "1inch", "odos", "jupiter", "kyberswap"],
+                    },
+                },
+                "required": ["vendor"],
+            },
+        },
+        {
+            "name": "call_vendor_mcp_tool",
+            "description": (
+                "Call a read-only tool on a vendor MCP. Example: lifi get-chains, "
+                "odos ODOS_GET_CHAIN_ID with chain Base, jupiter jupiter_get_price."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "vendor": {
+                        "type": "string",
+                        "enum": ["lifi", "1inch", "odos", "jupiter", "kyberswap"],
+                    },
+                    "tool_name": {"type": "string"},
+                    "arguments": {"type": "object"},
+                },
+                "required": ["vendor", "tool_name", "arguments"],
+            },
+        },
+        {
+            "name": "probe_vendor_mcp",
+            "description": "Smoke-probe a vendor MCP: list_tools + configured read-only tool call.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "vendor": {
+                        "type": "string",
+                        "enum": ["lifi", "1inch", "odos", "jupiter", "kyberswap"],
+                    },
+                },
+                "required": ["vendor"],
+            },
+        },
     ]
 
 
@@ -258,4 +308,29 @@ async def execute_tool(name: str, tool_input: dict[str, Any]) -> str:
                 "objective": intent.objective,
             }
         )
+    if name == "list_vendor_mcp_tools":
+        from goldenmcp_web_agent.vendor_mcp import list_vendor_tools
+
+        tools = await list_vendor_tools(tool_input["vendor"])
+        return json.dumps({"vendor": tool_input["vendor"], "tools": tools})
+    if name == "call_vendor_mcp_tool":
+        from goldenmcp_web_agent.vendor_mcp import call_vendor_tool
+
+        out = await call_vendor_tool(
+            tool_input["vendor"],
+            tool_input["tool_name"],
+            tool_input.get("arguments") or {},
+        )
+        return json.dumps(
+            {
+                "vendor": tool_input["vendor"],
+                "tool_name": tool_input["tool_name"],
+                "result": out,
+            }
+        )
+    if name == "probe_vendor_mcp":
+        from goldenmcp_web_agent.vendor_mcp import probe_vendor
+
+        result = await probe_vendor(tool_input["vendor"])
+        return json.dumps(result.to_dict())
     raise ValueError(f"unknown tool: {name}")
