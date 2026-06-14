@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 import subprocess
 import sys
 import threading
@@ -274,6 +275,16 @@ def _run_inspect_job(run_id: str, request: InspectEvalRequest, settings: RunnerS
         "--time-limit",
         str(settings.eval_inspect_time_limit),
     ]
+    # Per-model generation tweaks, read by tasks._generate_config in the subprocess:
+    #  - Qwen: disable thinking (chat_template_kwargs) so it answers without a
+    #    long reasoning preamble.
+    #  - gpt-oss: reasoning_effort=low to keep the eval fast (fewer tokens -> fewer
+    #    inspect polls, under the CRE HTTP-call cap).
+    sub_env = dict(os.environ)
+    if "qwen" in model.lower():
+        sub_env["GOLDENMCP_DISABLE_THINKING"] = "1"
+    if "gpt-oss" in model.lower():
+        sub_env["GOLDENMCP_REASONING_EFFORT"] = "low"
     try:
         proc = subprocess.run(
             cmd,
@@ -281,6 +292,7 @@ def _run_inspect_job(run_id: str, request: InspectEvalRequest, settings: RunnerS
             capture_output=True,
             text=True,
             timeout=settings.eval_inspect_timeout,
+            env=sub_env,
         )
     except subprocess.TimeoutExpired:
         logger.error(

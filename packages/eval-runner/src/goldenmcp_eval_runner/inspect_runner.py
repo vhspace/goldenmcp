@@ -28,9 +28,16 @@ LEAKABLE_ANTHROPIC_ENV = (
 )
 
 
+# MCP name (benchmark dir / onchain registry name) -> Inspect task-function prefix.
+# Most match 1:1; only names that aren't valid Python identifiers need an alias
+# (a @task function can't start with a digit, so "1inch" registers as "oneinch").
+_TASK_NAME_ALIASES = {"1inch": "oneinch"}
+
+
 def inspect_task_spec(mcp: str, capability: str) -> str:
     """Return Inspect registry task name (matches @task-decorated function in goldenmcp_inspect.tasks)."""
-    return f"{mcp.replace('-', '_')}_{capability.replace('-', '_')}"
+    prefix = _TASK_NAME_ALIASES.get(mcp, mcp).replace("-", "_")
+    return f"{prefix}_{capability.replace('-', '_')}"
 
 
 def resolve_model_routing(

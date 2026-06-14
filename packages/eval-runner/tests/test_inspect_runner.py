@@ -12,6 +12,10 @@ from goldenmcp_eval_runner import inspect_runner
 
 def test_inspect_task_spec():
     assert inspect_runner.inspect_task_spec("lifi", "quote") == "lifi_quote"
+    assert inspect_runner.inspect_task_spec("jupiter", "positions") == "jupiter_positions"
+    # 1inch isn't a valid Python identifier prefix; it registers as oneinch_*.
+    assert inspect_runner.inspect_task_spec("1inch", "quote") == "oneinch_quote"
+    assert inspect_runner.inspect_task_spec("1inch", "swap") == "oneinch_swap"
 
 
 def _eval_log_namespace(

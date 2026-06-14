@@ -96,7 +96,7 @@ class InferenceIndex:
 # submit both to one CAI judge that sums across models.
 ENSEMBLE_MODELS = (
     "together/Qwen/Qwen3.5-9B",
-    "together/google/gemma-4-31B-it",
+    "together/openai/gpt-oss-20b",
 )
 
 

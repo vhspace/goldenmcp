@@ -11,6 +11,7 @@ dependencies = [
     "inspect-ai>=0.3",
     "openai>=1.0",
     "anthropic>=0.40",
+    "web3>=7.0",
     "goldenmcp-inspect-web3",
     "goldenmcp-walrus",
 ]

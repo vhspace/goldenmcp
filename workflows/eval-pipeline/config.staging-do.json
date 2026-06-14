@@ -14,8 +14,8 @@
   "rotateBenchmarks": true,
   "caiPollMaxAttempts": 60,
   "caiPollIntervalMs": 2000,
-  "inspectPollMaxAttempts": 300,
-  "inspectPollIntervalMs": 2000,
-  "publishPollMaxAttempts": 8,
-  "publishPollIntervalMs": 6000
+  "inspectPollMaxAttempts": 7,
+  "inspectPollIntervalMs": 22000,
+  "publishPollMaxAttempts": 5,
+  "publishPollIntervalMs": 8000
 }
