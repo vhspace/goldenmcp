@@ -1,6 +1,7 @@
 /** Server-side use-case workflow steps — Arc registry, marketplace x402 (GH #82). */
 
 import { fetchLeaderboard, resolveENS } from "@/lib/data";
+import { evalRunnerUrl, marketplaceUrl } from "@/lib/web-env";
 import type {
   ExecutionResult,
   MarketplaceMcpResult,
@@ -127,16 +128,7 @@ async function runMarketplaceLookup(
   capability: string,
   minScore: number,
 ): Promise<ExecutionResult> {
-  const marketplaceUrl =
-    process.env.MARKETPLACE_URL ??
-    process.env.NEXT_PUBLIC_MARKETPLACE_URL ??
-    "http://localhost:8091";
-
-  const evalRunnerUrl =
-    process.env.EVAL_RUNNER_URL ??
-    `http://${process.env.EVAL_RUNNER_HOST ?? "127.0.0.1"}:${process.env.EVAL_RUNNER_PORT ?? "8090"}`;
-
-  const healthRes = await fetch(`${evalRunnerUrl.replace(/\/$/, "")}/health`, {
+  const healthRes = await fetch(`${evalRunnerUrl()}/health`, {
     signal: AbortSignal.timeout(5000),
   });
   if (!healthRes.ok) {
@@ -145,7 +137,7 @@ async function runMarketplaceLookup(
     );
   }
 
-  const lookupUrl = `${marketplaceUrl.replace(/\/$/, "")}/tools/lookup`;
+  const lookupUrl = `${marketplaceUrl()}/tools/lookup`;
   const lookupRes = await fetch(lookupUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
