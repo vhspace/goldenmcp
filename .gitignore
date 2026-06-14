@@ -33,3 +33,4 @@ infra/terraform/eval-runner/override.tf.json
 
 # CRE TypeScript build artifact (transient)
 workflows/eval-pipeline/src/.cre_build_tmp.js
+.vercel

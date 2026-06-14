@@ -209,20 +209,6 @@ export async function fetchVendorProfiles(): Promise<VendorProfile[]> {
           profile.ensStale = expiry <= Math.floor(Date.now() / 1000);
         }
       }
-
-      try {
-        // Latency comes straight from the manifest (eval-runner embeds it from the
-        // Inspect log's stats.total_time). The .eval log itself is a zstd ZIP we
-        // can't cheaply unzip in the browser, so we never fetch it for timing.
-        const manifest = await fetchManifest(profile.mcp, profile.primaryCapability);
-        if (typeof manifest.latency_ms === "number" && manifest.latency_ms > 0) {
-          profile.latencyMs = manifest.latency_ms;
-        } else {
-          profile.latencyError = "manifest has no latency_ms (re-run eval to populate timing)";
-        }
-      } catch (err) {
-        profile.latencyError = err instanceof Error ? err.message : String(err);
-      }
     }),
   );
 

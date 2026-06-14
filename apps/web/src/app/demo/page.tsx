@@ -89,7 +89,7 @@ export default async function DemoPage() {
                 Meters: Green ≥ {METER_THRESHOLDS.greenMin * 100}%, Yellow ≥{" "}
                 {METER_THRESHOLDS.yellowMin * 100}%, Red below
               </li>
-              <li>Cost Efficiency = token optimization · Reliability = data correctness · Latency from Inspect eval log stats</li>
+              <li>Cost Efficiency = token optimization · Reliability = data correctness</li>
             </ul>
           </aside>
         </>

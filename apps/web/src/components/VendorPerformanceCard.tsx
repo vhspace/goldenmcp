@@ -1,11 +1,5 @@
 import Link from "next/link";
-import {
-  formatLatencyMs,
-  goldenScoreBadge,
-  latencyMeterValue,
-  meterColor,
-  type VendorProfile,
-} from "@/lib/vendors";
+import { goldenScoreBadge, meterColor, type VendorProfile } from "@/lib/vendors";
 
 const METER_COLORS: Record<ReturnType<typeof meterColor>, string> = {
   green: "#34d399",
@@ -61,8 +55,6 @@ function ScoreMeter({
 
 export function VendorPerformanceCard({ vendor }: { vendor: VendorProfile }) {
   const badge = goldenScoreBadge(vendor.goldenScore);
-  const latencyValue =
-    vendor.latencyMs !== null ? latencyMeterValue(vendor.latencyMs) : null;
 
   return (
     <article
@@ -119,17 +111,6 @@ export function VendorPerformanceCard({ vendor }: { vendor: VendorProfile }) {
         value={vendor.costEfficiency}
         display={`${Math.round(vendor.costEfficiency * 100)}%`}
       />
-      {latencyValue !== null ? (
-        <ScoreMeter
-          label="Latency"
-          value={latencyValue}
-          display={formatLatencyMs(vendor.latencyMs)}
-        />
-      ) : (
-        <p style={{ color: "#f87171", fontSize: "0.75rem", marginTop: "0.75rem" }}>
-          Latency unavailable: {vendor.latencyError ?? "eval log has no timing stats"}
-        </p>
-      )}
       <ScoreMeter
         label="Reliability"
         value={vendor.reliability}
