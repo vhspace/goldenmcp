@@ -1,6 +1,8 @@
 import {
+  consensusIdenticalAggregation,
   EVMClient,
   HTTPClient,
+  type HTTPSendRequester,
   ok,
   prepareReportRequest,
   text,
@@ -178,6 +180,52 @@ function encodeHttpBody(payload: string): string {
   return bytesToBase64(new TextEncoder().encode(payload));
 }
 
+interface CreHttpRequest {
+  url: string;
+  method?: string;
+  body?: string;
+  headers?: Record<string, string>;
+  timeout?: string;
+}
+
+interface CreHttpResult {
+  statusCode: number;
+  bodyText: string;
+}
+
+/**
+ * Make an outbound HTTP request from a CRE workflow.
+ *
+ * The HTTP capability runs in NODE mode: `sendRequest(runtime, fn, aggregation)`
+ * wraps `runtime.runInNodeMode((nodeRuntime) => fn(new SendRequester(...)))`, and
+ * each node's result is aggregated by consensus. Calling the raw
+ * `sendRequest(runtime, {request}).result()` shape with the DON runtime never
+ * dispatches a node-mode execution, so `.result()` blocks forever.
+ *
+ * Our eval-runner / CAI responses are deterministic, so we collapse the response
+ * to a primitive-shaped {statusCode, bodyText} and aggregate it as identical.
+ */
+export function creHttp(runtime: Runtime<Config>, req: CreHttpRequest): CreHttpResult {
+  return httpClient
+    .sendRequest(
+      runtime,
+      (sender: HTTPSendRequester): CreHttpResult => {
+        const resp = sender
+          .sendRequest({
+            url: req.url,
+            method: req.method ?? "GET",
+            ...(req.body !== undefined ? { body: req.body } : {}),
+            ...(req.headers ? { headers: req.headers } : {}),
+            ...(req.timeout ? { timeout: req.timeout } : {}),
+          })
+          .result();
+        return { statusCode: resp.statusCode, bodyText: text(resp) };
+      },
+      consensusIdenticalAggregation<CreHttpResult>(),
+    )()
+    .result();
+}
+
 export function requireCaiAttestationFields(attestation: CaiAttestation): CaiAttestation {
   if (!attestation.inference_id?.trim()) {
     throw new Error("CAI inference completed but response contained no inference id");
@@ -186,16 +234,16 @@ export function requireCaiAttestationFields(attestation: CaiAttestation): CaiAtt
 }
 
 function requireHttpOk(
-  response: ReturnType<ReturnType<HTTPClient["sendRequest"]>["result"]>,
+  response: CreHttpResult,
   context: string,
   allowedStatuses: number[] = [200],
 ): string {
-  if (!ok(response) || !allowedStatuses.includes(response.statusCode)) {
-    const body = text(response);
+  if (!allowedStatuses.includes(response.statusCode)) {
+    const body = response.bodyText;
     const snippet = body.length > 500 ? `${body.slice(0, 500)}…` : body;
     throw new Error(`${context}: HTTP ${response.statusCode} — ${snippet}`);
   }
-  return text(response);
+  return response.bodyText;
 }
 
 export function getEvalRunnerApiKey(runtime: Runtime<Config>): string {
@@ -259,14 +307,12 @@ export function pollEvalRunUntilScored(
   let lastStatus = "queued";
 
   for (let attempt = 1; attempt <= config.inspectPollMaxAttempts; attempt++) {
-    const pollResponse = httpClient
-      .sendRequest(runtime, {
-        url: `${base}/eval/runs/${encodeURIComponent(runId)}`,
-        method: "GET",
-        headers: authHeaders(apiKey),
-        timeout: CRE_HTTP_TIMEOUT,
-      })
-      .result();
+    const pollResponse = creHttp(runtime, {
+      url: `${base}/eval/runs/${encodeURIComponent(runId)}`,
+      method: "GET",
+      headers: authHeaders(apiKey),
+      timeout: CRE_HTTP_TIMEOUT,
+    });
     const pollText = requireHttpOk(pollResponse, `eval/runs/${runId} attempt ${attempt}`);
     const pollParsed = parseEvalRunPoll(pollText);
     lastStatus = pollParsed.status;
@@ -303,14 +349,12 @@ export function pollEvalRunUntilPublished(
   let lastStatus = "publishing";
 
   for (let attempt = 1; attempt <= config.publishPollMaxAttempts; attempt++) {
-    const pollResponse = httpClient
-      .sendRequest(runtime, {
-        url: `${base}/eval/runs/${encodeURIComponent(runId)}`,
-        method: "GET",
-        headers: authHeaders(apiKey),
-        timeout: CRE_HTTP_TIMEOUT,
-      })
-      .result();
+    const pollResponse = creHttp(runtime, {
+      url: `${base}/eval/runs/${encodeURIComponent(runId)}`,
+      method: "GET",
+      headers: authHeaders(apiKey),
+      timeout: CRE_HTTP_TIMEOUT,
+    });
     const pollText = requireHttpOk(pollResponse, `eval/runs/${runId} attempt ${attempt}`);
     const pollParsed = parseEvalRunPoll(pollText);
     lastStatus = pollParsed.status;
@@ -355,15 +399,13 @@ export async function runEvalScore(
       capability: target.capability,
       transcript: MINIMAL_SCORE_TRANSCRIPT,
     });
-    const response = httpClient
-      .sendRequest(runtime, {
-        url: `${base}/eval/score`,
-        method: "POST",
-        body: encodeHttpBody(body),
-        headers: jsonAuthHeaders(apiKey),
-        timeout: CRE_HTTP_TIMEOUT,
-      })
-      .result();
+    const response = creHttp(runtime, {
+      url: `${base}/eval/score`,
+      method: "POST",
+      body: encodeHttpBody(body),
+      headers: jsonAuthHeaders(apiKey),
+      timeout: CRE_HTTP_TIMEOUT,
+    });
     const bodyText = requireHttpOk(response, `eval/score ${target.mcp}/${target.capability}`);
     const parsed = JSON.parse(bodyText) as { run_id: string; manifest: ScoreManifest };
     runtime.log(`eval/score run_id=${parsed.run_id} composite=${parsed.manifest.composite}`);
@@ -378,15 +420,13 @@ export async function runEvalScore(
       ? { mcp: target.mcp, capability: target.capability, model }
       : { mcp: target.mcp, capability: target.capability },
   );
-  const response = httpClient
-    .sendRequest(runtime, {
-      url: `${base}/eval/inspect`,
-      method: "POST",
-      body: encodeHttpBody(inspectBody),
-      headers: jsonAuthHeaders(apiKey),
-      timeout: CRE_HTTP_TIMEOUT,
-    })
-    .result();
+  const response = creHttp(runtime, {
+    url: `${base}/eval/inspect`,
+    method: "POST",
+    body: encodeHttpBody(inspectBody),
+    headers: jsonAuthHeaders(apiKey),
+    timeout: CRE_HTTP_TIMEOUT,
+  });
   const bodyText = requireHttpOk(response, `eval/inspect ${target.mcp}/${target.capability}`, [200, 202]);
   const accepted = JSON.parse(bodyText) as { run_id: string; status: string };
   if (!accepted.run_id) {
@@ -460,18 +500,16 @@ export function submitCaiInference(
   runtime.log(
     `CAI POST /v1/inference model=${CAI_MODEL} run_id=${manifests[0].run_id} manifests=${manifests.length}`,
   );
-  const submitResponse = httpClient
-    .sendRequest(runtime, {
-      url: `${base}/v1/inference`,
-      method: "POST",
-      body: encodeHttpBody(JSON.stringify(submitBody)),
-      headers: {
-        ...authHeaders(caiApiKey),
-        "Content-Type": "application/json",
-      },
-      timeout: CRE_HTTP_TIMEOUT,
-    })
-    .result();
+  const submitResponse = creHttp(runtime, {
+    url: `${base}/v1/inference`,
+    method: "POST",
+    body: encodeHttpBody(JSON.stringify(submitBody)),
+    headers: {
+      ...authHeaders(caiApiKey),
+      "Content-Type": "application/json",
+    },
+    timeout: CRE_HTTP_TIMEOUT,
+  });
 
   const submitText = requireHttpOk(submitResponse, "CAI /v1/inference submit");
   const submitParsed = JSON.parse(submitText) as { id: string; status?: string };
@@ -497,14 +535,12 @@ export async function caiAttest(
 
   let lastStatus = "queued";
   for (let attempt = 1; attempt <= config.caiPollMaxAttempts; attempt++) {
-    const pollResponse = httpClient
-      .sendRequest(runtime, {
-        url: `${base}/v1/inference/${encodeURIComponent(inferenceId)}`,
-        method: "GET",
-        headers: authHeaders(caiApiKey),
-        timeout: CRE_HTTP_TIMEOUT,
-      })
-      .result();
+    const pollResponse = creHttp(runtime, {
+      url: `${base}/v1/inference/${encodeURIComponent(inferenceId)}`,
+      method: "GET",
+      headers: authHeaders(caiApiKey),
+      timeout: CRE_HTTP_TIMEOUT,
+    });
     const pollText = requireHttpOk(pollResponse, `CAI poll ${inferenceId} attempt ${attempt}`);
     const pollParsed = JSON.parse(pollText) as CaiStatus;
     lastStatus = pollParsed.status ?? "queued";
@@ -550,15 +586,13 @@ export async function publishToWalrus(
   });
 
   runtime.log(`POST /eval/publish (async) run_id=${runId}`);
-  const response = httpClient
-    .sendRequest(runtime, {
-      url: `${base}/eval/publish`,
-      method: "POST",
-      body: encodeHttpBody(body),
-      headers: jsonAuthHeaders(apiKey),
-      timeout: CRE_HTTP_TIMEOUT,
-    })
-    .result();
+  const response = creHttp(runtime, {
+    url: `${base}/eval/publish`,
+    method: "POST",
+    body: encodeHttpBody(body),
+    headers: jsonAuthHeaders(apiKey),
+    timeout: CRE_HTTP_TIMEOUT,
+  });
   const bodyText = requireHttpOk(response, `eval/publish run_id=${runId}`, [200, 202]);
   const accepted = JSON.parse(bodyText) as { run_id?: string; status?: string };
   runtime.log(`eval/publish accepted run_id=${runId} status=${accepted.status ?? "published"}`);
@@ -587,15 +621,13 @@ export function registerCaiSubmitted(
   apiKey: string,
 ): void {
   const base = runtime.config.evalRunnerUrl.replace(/\/$/, "");
-  const response = httpClient
-    .sendRequest(runtime, {
-      url: `${base}/eval/cai-submitted`,
-      method: "POST",
-      body: encodeHttpBody(JSON.stringify({ inference_id: inferenceId, run_id: runId })),
-      headers: jsonAuthHeaders(apiKey),
-      timeout: CRE_HTTP_TIMEOUT,
-    })
-    .result();
+  const response = creHttp(runtime, {
+    url: `${base}/eval/cai-submitted`,
+    method: "POST",
+    body: encodeHttpBody(JSON.stringify({ inference_id: inferenceId, run_id: runId })),
+    headers: jsonAuthHeaders(apiKey),
+    timeout: CRE_HTTP_TIMEOUT,
+  });
   requireHttpOk(response, `eval/cai-submitted inference_id=${inferenceId}`);
   runtime.log(`registered inference_id=${inferenceId} -> run_id=${runId}`);
 }
@@ -622,15 +654,13 @@ export function recordPair(
     run_id: runId,
     models_total: modelsTotal,
   });
-  const response = httpClient
-    .sendRequest(runtime, {
-      url: `${base}/eval/pair`,
-      method: "POST",
-      body: encodeHttpBody(body),
-      headers: jsonAuthHeaders(apiKey),
-      timeout: CRE_HTTP_TIMEOUT,
-    })
-    .result();
+  const response = creHttp(runtime, {
+    url: `${base}/eval/pair`,
+    method: "POST",
+    body: encodeHttpBody(body),
+    headers: jsonAuthHeaders(apiKey),
+    timeout: CRE_HTTP_TIMEOUT,
+  });
   const bodyText = requireHttpOk(response, `eval/pair ${target.mcp}/${target.capability}`);
   return JSON.parse(bodyText) as { complete: boolean; runs: Record<string, string> };
 }
@@ -638,13 +668,11 @@ export function recordPair(
 /** Resolve an MCP name to its onchain agent id via the eval-runner (nameToAgentId). 0 = unresolved. */
 export function fetchAgentId(runtime: Runtime<Config>, mcp: string): number {
   const base = runtime.config.evalRunnerUrl.replace(/\/$/, "");
-  const response = httpClient
-    .sendRequest(runtime, {
-      url: `${base}/agent-id?mcp=${encodeURIComponent(mcp)}`,
-      method: "GET",
-      timeout: CRE_HTTP_TIMEOUT,
-    })
-    .result();
+  const response = creHttp(runtime, {
+    url: `${base}/agent-id?mcp=${encodeURIComponent(mcp)}`,
+    method: "GET",
+    timeout: CRE_HTTP_TIMEOUT,
+  });
   const bodyText = requireHttpOk(response, `agent-id ${mcp}`);
   const parsed = JSON.parse(bodyText) as { agent_id?: number };
   return parsed.agent_id ?? 0;
@@ -657,14 +685,12 @@ export function fetchManifestByRunId(
   apiKey: string,
 ): ScoreManifest {
   const base = runtime.config.evalRunnerUrl.replace(/\/$/, "");
-  const response = httpClient
-    .sendRequest(runtime, {
-      url: `${base}/eval/runs/${encodeURIComponent(runId)}`,
-      method: "GET",
-      headers: authHeaders(apiKey),
-      timeout: CRE_HTTP_TIMEOUT,
-    })
-    .result();
+  const response = creHttp(runtime, {
+    url: `${base}/eval/runs/${encodeURIComponent(runId)}`,
+    method: "GET",
+    headers: authHeaders(apiKey),
+    timeout: CRE_HTTP_TIMEOUT,
+  });
   const bodyText = requireHttpOk(response, `eval/runs/${runId}`);
   const parsed = JSON.parse(bodyText) as { manifest?: ScoreManifest };
   if (!parsed.manifest) {
@@ -696,15 +722,13 @@ export function publishByInferenceId(
   const body = JSON.stringify({ inference_id: inferenceId, attestation });
 
   runtime.log(`POST /eval/publish (by inference_id=${inferenceId})`);
-  const response = httpClient
-    .sendRequest(runtime, {
-      url: `${base}/eval/publish`,
-      method: "POST",
-      body: encodeHttpBody(body),
-      headers: jsonAuthHeaders(apiKey),
-      timeout: CRE_HTTP_TIMEOUT,
-    })
-    .result();
+  const response = creHttp(runtime, {
+    url: `${base}/eval/publish`,
+    method: "POST",
+    body: encodeHttpBody(body),
+    headers: jsonAuthHeaders(apiKey),
+    timeout: CRE_HTTP_TIMEOUT,
+  });
   const bodyText = requireHttpOk(response, `eval/publish inference_id=${inferenceId}`, [200, 202]);
   const accepted = JSON.parse(bodyText) as { run_id?: string; status?: string };
   const runId = accepted.run_id;
