@@ -16,6 +16,7 @@ from fastapi import Body, Depends, FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from goldenmcp_eval_runner.agent_resolver import resolve_agent_id
 from goldenmcp_eval_runner.auth import require_api_key, require_cai_webhook_secret
 from goldenmcp_eval_runner.inspect_logs import read_inspect_log_file
 from goldenmcp_eval_runner.jobs import EvalJob, eval_jobs, JobStatus
@@ -436,6 +437,17 @@ def benchmarks():
     return {"benchmarks": [{"mcp": m, "capability": c} for m, c in list_benchmarks()]}
 
 
+@app.get("/agent-id")
+def agent_id(mcp: str):
+    """Resolve an MCP name to its onchain agent id (nameToAgentId), or 0 if unset.
+
+    Handler B uses this to write the score/attestation to the correct agent after
+    it resolves the run's MCP from the CAI inference id.
+    """
+    settings = get_settings()
+    return {"mcp": mcp, "agent_id": resolve_agent_id(mcp, settings.arc_rpc_url, settings.arc_registry_address)}
+
+
 @app.get("/benchmarks/next")
 def benchmarks_next():
     """Return the next (benchmark × model) pair in the round-robin and advance.
@@ -448,7 +460,14 @@ def benchmarks_next():
     items = list_benchmarks()
     if not items:
         raise HTTPException(status_code=404, detail="no benchmarks available")
-    return benchmark_cursor.next_pair(items)
+    pair = benchmark_cursor.next_pair(items)
+    # Resolve this MCP's onchain agent id so the score writes to the right agent
+    # (best-effort; 0 -> the workflow uses its defaultAgentId).
+    settings = get_settings()
+    pair["agent_id"] = resolve_agent_id(
+        str(pair["mcp"]), settings.arc_rpc_url, settings.arc_registry_address
+    )
+    return pair
 
 
 @app.get(

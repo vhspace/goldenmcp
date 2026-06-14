@@ -635,6 +635,21 @@ export function recordPair(
   return JSON.parse(bodyText) as { complete: boolean; runs: Record<string, string> };
 }
 
+/** Resolve an MCP name to its onchain agent id via the eval-runner (nameToAgentId). 0 = unresolved. */
+export function fetchAgentId(runtime: Runtime<Config>, mcp: string): number {
+  const base = runtime.config.evalRunnerUrl.replace(/\/$/, "");
+  const response = httpClient
+    .sendRequest(runtime, {
+      url: `${base}/agent-id?mcp=${encodeURIComponent(mcp)}`,
+      method: "GET",
+      timeout: CRE_HTTP_TIMEOUT,
+    })
+    .result();
+  const bodyText = requireHttpOk(response, `agent-id ${mcp}`);
+  const parsed = JSON.parse(bodyText) as { agent_id?: number };
+  return parsed.agent_id ?? 0;
+}
+
 /** Fetch a scored run's manifest from the eval-runner by run_id. */
 export function fetchManifestByRunId(
   runtime: Runtime<Config>,

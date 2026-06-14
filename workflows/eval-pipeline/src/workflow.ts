@@ -11,6 +11,7 @@ import {
 } from "@chainlink/cre-sdk";
 import { bytesToString } from "viem";
 import {
+  fetchAgentId,
   fetchManifestByRunId,
   getCaiApiKey,
   getEvalRunnerApiKey,
@@ -104,6 +105,7 @@ function fetchNextBenchmark(runtime: Runtime<Config>): {
   capability: string;
   model?: string;
   models_total?: number;
+  agent_id?: number;
   index: number;
   total: number;
 } {
@@ -127,14 +129,26 @@ async function onCronTrigger(runtime: Runtime<Config>): Promise<string> {
   // cycling through all of them across successive fires. Keeps each execution
   // under the CRE per-workflow HTTP-call cap and gives every benchmark its own
   // attested run. Enabled with rotateBenchmarks=true (the droplet/full target).
-  let items: Array<{ mcp: string; capability: string; model?: string; modelsTotal?: number }>;
+  let items: Array<{
+    mcp: string;
+    capability: string;
+    model?: string;
+    modelsTotal?: number;
+    agentId?: number;
+  }>;
   if (config.rotateBenchmarks) {
     const next = fetchNextBenchmark(runtime);
     runtime.log(
-      `rotateBenchmarks — fire runs ${next.mcp}/${next.capability} model=${next.model ?? "(default)"} (#${next.index + 1}/${next.total})`,
+      `rotateBenchmarks — fire runs ${next.mcp}/${next.capability} model=${next.model ?? "(default)"} agentId=${next.agent_id ?? "(default)"} (#${next.index + 1}/${next.total})`,
     );
     items = [
-      { mcp: next.mcp, capability: next.capability, model: next.model, modelsTotal: next.models_total },
+      {
+        mcp: next.mcp,
+        capability: next.capability,
+        model: next.model,
+        modelsTotal: next.models_total,
+        agentId: next.agent_id,
+      },
     ];
   } else {
     const benchmarksResponse = httpClient
@@ -181,7 +195,7 @@ async function onCronTrigger(runtime: Runtime<Config>): Promise<string> {
     const target: PipelineTarget = {
       mcp: bench.mcp,
       capability: bench.capability,
-      agentId: config.defaultAgentId,
+      agentId: bench.agentId && bench.agentId > 0 ? bench.agentId : config.defaultAgentId,
     };
     if (asyncMode) {
       results.push(await submitForAttestation(runtime, target, bench.model, bench.modelsTotal ?? 1));
@@ -225,21 +239,20 @@ async function onAttestationCallback(
 
   const evalRunnerApiKey = getEvalRunnerApiKey(runtime);
 
-  // 1) Record the attestation on-chain FIRST — it needs nothing from Walrus, so
-  //    it lands immediately without waiting on the (slow) upload poll.
-  const { attestationRecordTxHash } = await writeAttestationToArc(
-    runtime,
-    config.defaultAgentId,
-    attestation,
-  );
-
-  // 2) Resolve the run via inference_id and publish manifest + eval log to Walrus.
+  // 1) Resolve the run via inference_id and publish manifest + eval log to Walrus.
+  //    This also tells us the MCP, so we can write to ITS agent id (not a default).
   const published = publishByInferenceId(runtime, attestation.inference_id, evalRunnerApiKey, attestation);
+  const resolvedAgentId = fetchAgentId(runtime, published.mcp);
+  const agentId = resolvedAgentId > 0 ? resolvedAgentId : config.defaultAgentId;
+  runtime.log(`handler B writing to agentId=${agentId} (mcp=${published.mcp})`);
 
-  // 3) Write the score row with the Walrus blob pointer (needs the upload result).
+  // 2) Record the attestation on-chain (inference id + transcript hash).
+  const { attestationRecordTxHash } = await writeAttestationToArc(runtime, agentId, attestation);
+
+  // 3) Write the score row with the Walrus blob pointer.
   const { scoreTxHash } = await writeScoreToArc(
     runtime,
-    config.defaultAgentId,
+    agentId,
     published.capability,
     published.manifest,
     published.walrus_manifest_blob_id,

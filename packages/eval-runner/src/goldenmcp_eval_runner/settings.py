@@ -20,6 +20,11 @@ class RunnerSettings(BaseSettings):
     # kill at eval_inspect_timeout. Keep < eval_inspect_timeout and < CRE poll budget.
     eval_inspect_time_limit: int = 150
     eval_inspect_model: str = "together/google/gemma-4-31B-it"
+    # Arc registry read access — used to resolve a benchmark's MCP name to its
+    # onchain agent id (nameToAgentId) for /benchmarks/next. Optional: when unset,
+    # /benchmarks/next omits agent_id and the workflow falls back to defaultAgentId.
+    arc_rpc_url: str = ""
+    arc_registry_address: str = ""
 
 
 @lru_cache
