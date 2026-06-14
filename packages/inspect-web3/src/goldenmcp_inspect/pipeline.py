@@ -10,6 +10,8 @@ from typing import Any
 from goldenmcp_inspect.benchmarks import load_benchmark
 from goldenmcp_inspect.manifest import (
     build_manifest,
+    extract_scores_from_inspect_log,
+    manifest_from_scores,
     manifest_to_json,
     synthesize_inspect_log_bytes,
     transcript_from_inspect_log,
@@ -152,7 +154,24 @@ def post_eval_from_inspect_log(
     inspect_log_bytes: bytes | None = None,
     filesystem: WalrusFileSystem | None = None,
 ) -> WalrusUploadResult:
-    """Parse Inspect eval log JSON and upload scores + raw log to Walrus."""
+    """Upload scores + raw log to Walrus, preferring the eval's own score.
+
+    A real Inspect `.eval` already carries the authoritative score (the in-task
+    goldenmcp_scorer ran against the full TaskState). Use it directly when present;
+    only fall back to re-deriving a transcript and re-scoring for logs that lack an
+    embedded goldenmcp_scorer score (e.g. the synthesized minimal log shape).
+    """
+    embedded = extract_scores_from_inspect_log(log_data)
+    if embedded is not None:
+        benchmark = load_benchmark(mcp, capability)
+        manifest = manifest_from_scores(embedded, benchmark, run_id=run_id)
+        return publish_manifest_to_walrus(
+            manifest,
+            walrus=walrus,
+            inspect_log_bytes=inspect_log_bytes,
+            filesystem=filesystem,
+        )
+
     transcript = transcript_from_inspect_log(log_data, mcp, capability)
     return post_eval_walrus_upload(
         transcript,

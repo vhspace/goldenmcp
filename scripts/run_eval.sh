@@ -41,8 +41,17 @@ EVAL_TIME_LIMIT="${EVAL_TIME_LIMIT:-120}"
 [[ -f "$ENV_FILE" ]] || { echo "missing $ENV_FILE (run setup_eval_env.sh)" >&2; exit 1; }
 set -a; . "$ENV_FILE"; set +a
 
-: "${DO_INFERENCE_KEY:?DO_INFERENCE_KEY required for Haiku via DO proxy}"
-: "${ANTHROPIC_BASE_URL:?ANTHROPIC_BASE_URL required (DO proxy)}"
+# Haiku routing: prefer the DO inference proxy when both vars are present
+# (the droplet/CRE path), otherwise fall back to the direct Anthropic API using
+# ANTHROPIC_API_KEY. The fallback lets the ensemble run on a laptop with no DO
+# proxy access — the Together routing below is unaffected either way.
+HAIKU_VIA_PROXY=0
+if [[ -n "${ANTHROPIC_BASE_URL:-}" && -n "${DO_INFERENCE_KEY:-}" ]]; then
+  HAIKU_VIA_PROXY=1
+elif [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+  echo "Haiku needs either (ANTHROPIC_BASE_URL + DO_INFERENCE_KEY) or ANTHROPIC_API_KEY" >&2
+  exit 1
+fi
 : "${TOGETHER_API_KEY:?TOGETHER_API_KEY required for Llama/MiniMax}"
 
 cd "$PKG"
@@ -54,12 +63,25 @@ CLEAN_ENV=(env -u ANTHROPIC_API_KEY -u ANTHROPIC_BASE_URL
            -u ANTHROPIC_DEFAULT_SONNET_MODEL -u ANTHROPIC_DEFAULT_HAIKU_MODEL)
 
 run_haiku() {
-  "${CLEAN_ENV[@]}" uv run "${WITH[@]}" \
-    inspect eval "src/goldenmcp_inspect/tasks.py@${TASK}" \
-      --model anthropic/anthropic-claude-haiku-4.5 \
-      --model-base-url "$ANTHROPIC_BASE_URL" \
-      -M "api_key=${DO_INFERENCE_KEY}" \
-      --max-connections 1 --time-limit "$EVAL_TIME_LIMIT" "$@"
+  if [[ "$HAIKU_VIA_PROXY" -eq 1 ]]; then
+    "${CLEAN_ENV[@]}" uv run "${WITH[@]}" \
+      inspect eval "src/goldenmcp_inspect/tasks.py@${TASK}" \
+        --model anthropic/anthropic-claude-haiku-4.5 \
+        --model-base-url "$ANTHROPIC_BASE_URL" \
+        -M "api_key=${DO_INFERENCE_KEY}" \
+        --max-connections 1 --time-limit "$EVAL_TIME_LIMIT" "$@"
+  else
+    # Direct Anthropic API: keep ANTHROPIC_API_KEY in env, strip only the proxy
+    # vars so a leaked base-url can't redirect the call.
+    env -u ANTHROPIC_BASE_URL -u ANTHROPIC_MODEL \
+        -u ANTHROPIC_DEFAULT_OPUS_MODEL -u ANTHROPIC_DEFAULT_SONNET_MODEL \
+        -u ANTHROPIC_DEFAULT_HAIKU_MODEL \
+        ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+      uv run "${WITH[@]}" \
+      inspect eval "src/goldenmcp_inspect/tasks.py@${TASK}" \
+        --model anthropic/anthropic-claude-haiku-4.5 \
+        --max-connections 1 --time-limit "$EVAL_TIME_LIMIT" "$@"
+  fi
 }
 
 run_together() {  # $1 = together slug; remaining args -> inspect
