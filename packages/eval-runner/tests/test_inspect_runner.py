@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import inspect_ai
@@ -152,3 +151,123 @@ def test_run_inspect_eval_raises_on_non_success_status(monkeypatch, tmp_path, st
             model="openai/gpt-4o-mini",
             repo_root=repo_root,
         )
+
+
+def test_run_inspect_eval_passes_time_limit_to_eval(monkeypatch, tmp_path):
+    """time_limit is forwarded to inspect_ai.eval; omitted when None/<=0."""
+    log_file = tmp_path / "logs" / "2026-06-13T12-00-00_lifi-quote.json"
+    log_file.parent.mkdir(parents=True)
+    log_file.write_bytes(b'{"status":"success","samples":[]}')
+
+    captured: dict = {}
+
+    def fake_eval(**kwargs):
+        captured.clear()
+        captured.update(kwargs)
+        return [_eval_log_namespace(status="success", location=str(log_file))]
+
+    monkeypatch.setattr(inspect_ai, "eval", fake_eval)
+    repo_root = tmp_path
+    (repo_root / "packages").mkdir()
+    (repo_root / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+
+    inspect_runner.run_inspect_eval(
+        mcp="lifi", capability="quote", model="m", repo_root=repo_root, time_limit=150
+    )
+    assert captured["time_limit"] == 150
+
+    inspect_runner.run_inspect_eval(
+        mcp="lifi", capability="quote", model="m", repo_root=repo_root, time_limit=None
+    )
+    assert "time_limit" not in captured
+
+    inspect_runner.run_inspect_eval(
+        mcp="lifi", capability="quote", model="m", repo_root=repo_root, time_limit=0
+    )
+    assert "time_limit" not in captured
+
+
+def test_main_prints_log_path_json(monkeypatch, tmp_path, capsys):
+    """The subprocess CLI prints {"log_path": ...} JSON and returns 0."""
+    import json
+
+    monkeypatch.setattr(
+        inspect_runner,
+        "run_inspect_eval",
+        lambda **kwargs: ("/tmp/x_lifi_quote.eval", {"status": "success"}, b"raw"),
+    )
+    rc = inspect_runner.main(
+        ["--mcp", "lifi", "--capability", "quote", "--model", "m", "--repo-root", str(tmp_path)]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out.strip().splitlines()[-1]
+    assert json.loads(out)["log_path"] == "/tmp/x_lifi_quote.eval"
+
+
+def test_main_returns_nonzero_and_stderr_on_failure(monkeypatch, tmp_path, capsys):
+    def boom(**kwargs):
+        raise RuntimeError("inspect eval failed: kaboom")
+
+    monkeypatch.setattr(inspect_runner, "run_inspect_eval", boom)
+    rc = inspect_runner.main(
+        ["--mcp", "lifi", "--capability", "quote", "--model", "m", "--repo-root", str(tmp_path)]
+    )
+    assert rc == 1
+    assert "kaboom" in capsys.readouterr().err
+
+
+def test_resolve_model_routing_anthropic_via_do_proxy():
+    routing = inspect_runner.resolve_model_routing(
+        "anthropic/anthropic-claude-haiku-4.5",
+        anthropic_base_url="https://inference.do-ai.run",
+        do_inference_key="do-key-123",
+    )
+    assert routing["model_base_url"] == "https://inference.do-ai.run"
+    assert routing["model_args"] == {"api_key": "do-key-123"}
+
+
+def test_resolve_model_routing_anthropic_without_do_creds_is_empty():
+    # No DO creds → direct Anthropic key path (no extras).
+    assert inspect_runner.resolve_model_routing(
+        "anthropic/anthropic-claude-haiku-4.5",
+        anthropic_base_url="",
+        do_inference_key="",
+    ) == {}
+
+
+def test_resolve_model_routing_together_is_empty():
+    assert inspect_runner.resolve_model_routing(
+        "together/google/gemma-4-31B-it",
+        anthropic_base_url="https://inference.do-ai.run",
+        do_inference_key="do-key-123",
+    ) == {}
+
+
+def test_main_strips_leaked_anthropic_env_and_routes(monkeypatch, tmp_path):
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://inference.do-ai.run")
+    monkeypatch.setenv("DO_INFERENCE_KEY", "do-key-123")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "leaked")
+    monkeypatch.setenv("ANTHROPIC_DEFAULT_HAIKU_MODEL", "leaked-model")
+
+    captured: dict = {}
+
+    def fake_run(**kwargs):
+        # Snapshot env + routing as the eval would see them.
+        captured["routing"] = kwargs.get("routing")
+        captured["env_after"] = {v: __import__("os").environ.get(v) for v in inspect_runner.LEAKABLE_ANTHROPIC_ENV}
+        return ("/tmp/x.eval", {"status": "success"}, b"raw")
+
+    monkeypatch.setattr(inspect_runner, "run_inspect_eval", fake_run)
+    rc = inspect_runner.main(
+        [
+            "--mcp", "lifi", "--capability", "quote",
+            "--model", "anthropic/anthropic-claude-haiku-4.5",
+            "--repo-root", str(tmp_path),
+        ]
+    )
+    assert rc == 0
+    # Leaked ambient vars are stripped before the eval...
+    assert all(v is None for v in captured["env_after"].values())
+    # ...and routing still carries the captured DO proxy values.
+    assert captured["routing"]["model_base_url"] == "https://inference.do-ai.run"
+    assert captured["routing"]["model_args"] == {"api_key": "do-key-123"}

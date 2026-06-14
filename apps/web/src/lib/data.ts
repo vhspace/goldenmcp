@@ -1,26 +1,69 @@
 import { createPublicClient, http, parseAbi } from "viem";
+import {
+  aggregateVendorProfiles,
+  extractLatencyMsFromEvalLog,
+  type LeaderboardEntry,
+  type VendorProfile,
+} from "@/lib/vendors";
 
-const REGISTRY_ABI = parseAbi([
-  "function nextAgentId() view returns (uint256)",
-  "function getRecord(uint256 agentId) view returns (string name, string mcpEndpoint, string agentUri, string ensName, string lastAttestationId, bytes32 lastTranscriptHash, bool exists)",
-  "function getCapabilityScore(uint256 agentId, string capability) view returns (uint16 dataScoreBps, uint16 pathScoreBps, uint16 tokenScoreBps, uint16 compositeBps, bool failed, string walrusBlobId)",
-]);
+export type { LeaderboardEntry, VendorProfile };
 
-export interface LeaderboardEntry {
-  mcp: string;
-  capability: string;
-  dataScore: number;
-  pathScore: number;
-  tokenEfficiency: number;
-  composite: number;
-  failed: boolean;
-  walrusBlobId: string;
-  ensName: string;
-  // CAI TEE inference id mirrored onchain. Empty when unattested.
-  attestationRef: string;
-  // bytes32 response digest from the TEE (0x000…0 when unattested).
-  transcriptHash: string;
-}
+const ZERO_BYTES32 = `0x${"0".repeat(64)}`;
+
+/** Tuple ABI — viem mis-decodes flattened struct returns for getRecord/getCapabilityScore. */
+const REGISTRY_ABI = [
+  {
+    type: "function",
+    name: "nextAgentId",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "getRecord",
+    stateMutability: "view",
+    inputs: [{ name: "agentId", type: "uint256" }],
+    outputs: [
+      {
+        type: "tuple",
+        name: "",
+        components: [
+          { name: "name", type: "string" },
+          { name: "mcpEndpoint", type: "string" },
+          { name: "agentUri", type: "string" },
+          { name: "ensName", type: "string" },
+          { name: "lastAttestationId", type: "string" },
+          { name: "lastTranscriptHash", type: "bytes32" },
+          { name: "exists", type: "bool" },
+        ],
+      },
+    ],
+  },
+  {
+    type: "function",
+    name: "getCapabilityScore",
+    stateMutability: "view",
+    inputs: [
+      { name: "agentId", type: "uint256" },
+      { name: "capability", type: "string" },
+    ],
+    outputs: [
+      {
+        type: "tuple",
+        name: "",
+        components: [
+          { name: "dataScoreBps", type: "uint16" },
+          { name: "pathScoreBps", type: "uint16" },
+          { name: "tokenEfficiencyBps", type: "uint16" },
+          { name: "compositeBps", type: "uint16" },
+          { name: "failed", type: "bool" },
+          { name: "walrusBlobId", type: "string" },
+        ],
+      },
+    ],
+  },
+] as const;
 
 function getClient() {
   const rpc = process.env.NEXT_PUBLIC_ARC_RPC_URL;
@@ -52,43 +95,122 @@ export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
       functionName: "getRecord",
       args: [id],
     });
-    if (!rec[6]) continue;
+    if (!rec.exists) continue;
     for (const cap of CAPABILITIES) {
-      const score = await client.readContract({
-        address: registry,
-        abi: REGISTRY_ABI,
-        functionName: "getCapabilityScore",
-        args: [id, cap],
-      });
-      if (!score[5]) continue;
+      let score;
+      try {
+        score = await client.readContract({
+          address: registry,
+          abi: REGISTRY_ABI,
+          functionName: "getCapabilityScore",
+          args: [id, cap],
+        });
+      } catch {
+        continue;
+      }
+      if (!score.walrusBlobId) continue;
       entries.push({
-        mcp: rec[0],
+        mcp: rec.name,
         capability: cap,
-        dataScore: Number(score[0]) / 10000,
-        pathScore: Number(score[1]) / 10000,
-        tokenEfficiency: Number(score[2]) / 10000,
-        composite: Number(score[3]) / 10000,
-        failed: score[4],
-        walrusBlobId: score[5],
-        ensName: rec[3],
-        attestationRef: rec[4],
+        dataScore: score.dataScoreBps / 10000,
+        pathScore: score.pathScoreBps / 10000,
+        tokenEfficiency: score.tokenEfficiencyBps / 10000,
+        composite: score.compositeBps / 10000,
+        failed: score.failed,
+        walrusBlobId: score.walrusBlobId,
+        ensName: rec.ensName,
+        attestationRef: rec.lastAttestationId,
         transcriptHash:
-          rec[5] && rec[5] !== `0x${"0".repeat(64)}` ? rec[5] : "",
+          rec.lastTranscriptHash && rec.lastTranscriptHash !== ZERO_BYTES32
+            ? rec.lastTranscriptHash
+            : "",
       });
     }
   }
   return entries.sort((a, b) => b.composite - a.composite);
 }
 
-export async function fetchManifest(mcp: string, capability: string) {
+export interface ScoreManifest {
+  failed?: boolean;
+  fail_reason?: string | null;
+  data_score?: number;
+  path_score?: number;
+  token_efficiency?: number;
+  composite?: number;
+  walrus_blob_id?: string | null;
+  walrus_manifest_blob_id?: string | null;
+  attestation?: Record<string, unknown> | null;
+  attestation_id?: string | null;
+  [key: string]: unknown;
+}
+
+export async function fetchManifest(mcp: string, capability: string): Promise<ScoreManifest> {
   const entries = await fetchLeaderboard();
   const entry = entries.find((e) => e.mcp === mcp && e.capability === capability);
   if (!entry) throw new Error(`No score for ${mcp}/${capability}`);
+  return fetchWalrusJson(entry.walrusBlobId);
+}
+
+async function fetchWalrusJson(blobId: string): Promise<Record<string, unknown>> {
   const aggregator = process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR_URL;
-  if (!aggregator) throw new Error("NEXT_PUBLIC_WALRUS_AGGREGATOR_URL is not set");
-  const res = await fetch(`${aggregator}/v1/blobs/${entry.walrusBlobId}`);
-  if (!res.ok) throw new Error(`Walrus fetch failed: ${res.status} ${await res.text()}`);
+  if (!aggregator) {
+    throw new Error("NEXT_PUBLIC_WALRUS_AGGREGATOR_URL is not set — cannot fetch Walrus manifests");
+  }
+  const res = await fetch(`${aggregator}/v1/blobs/${blobId}`);
+  if (!res.ok) {
+    throw new Error(`Walrus fetch failed for blob ${blobId}: HTTP ${res.status} ${await res.text()}`);
+  }
   return res.json();
+}
+
+export async function fetchVendorProfiles(): Promise<VendorProfile[]> {
+  const entries = await fetchLeaderboard();
+  if (entries.length === 0) {
+    throw new Error(
+      "No vendors in Arc registry — deploy MCPRegistry, register MCPs with ENS names, and run evals",
+    );
+  }
+
+  const profiles = aggregateVendorProfiles(entries);
+
+  await Promise.all(
+    profiles.map(async (profile) => {
+      if (profile.vendorName.includes(".eth")) {
+        try {
+          const records = await resolveENS(profile.vendorName);
+          profile.ensRecords = records;
+          if (!records["agent-endpoint[mcp]"] && !records["agent-context"]) {
+            profile.ensError = `ENSIP-25/26 records missing for ${profile.vendorName} — expected agent-context and agent-endpoint[mcp]`;
+          }
+        } catch (err) {
+          profile.ensError = err instanceof Error ? err.message : String(err);
+        }
+      }
+
+      try {
+        const manifest = await fetchManifest(profile.mcp, profile.primaryCapability);
+        const evalRef = manifest.walrus_blob_id;
+        if (typeof evalRef !== "string" || !evalRef.trim()) {
+          profile.latencyError = "manifest has no walrus_blob_id for eval log";
+          return;
+        }
+        if (evalRef.startsWith("walrus://")) {
+          profile.latencyError =
+            "eval log stored at walrus:// indexed path — open Inspect View for full timing";
+          return;
+        }
+        const evalLog = await fetchWalrusJson(evalRef);
+        profile.latencyMs = extractLatencyMsFromEvalLog(evalLog);
+        if (profile.latencyMs === null) {
+          profile.latencyError = "eval log has no timing stats (stats.total_time missing)";
+        }
+      } catch (err) {
+        profile.latencyError = err instanceof Error ? err.message : String(err);
+      }
+    }),
+  );
+
+  return profiles;
 }
 
 export async function resolveENS(name: string) {

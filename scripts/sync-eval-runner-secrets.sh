@@ -27,6 +27,8 @@ fi
 # Allowlist: application secrets only (no DO_API_KEY / Terraform tokens).
 ALLOWLIST=(
   ANTHROPIC_API_KEY
+  ANTHROPIC_BASE_URL
+  DO_INFERENCE_KEY
   TOGETHER_API_KEY
   OPENAI_API_KEY
   EVAL_CHAIN_QUOTE

@@ -1,4 +1,4 @@
-import { fetchManifest } from "@/lib/data";
+import { fetchManifest, type ScoreManifest } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +8,7 @@ export default async function MCPDetailPage({
   params: Promise<{ mcp: string; capability: string }>;
 }) {
   const { mcp, capability } = await params;
-  let manifest;
+  let manifest: ScoreManifest | undefined;
   let error = "";
   try {
     manifest = await fetchManifest(mcp, capability);
@@ -31,13 +31,13 @@ export default async function MCPDetailPage({
           )}
           <dl>
             <dt>DataScore</dt>
-            <dd>{(manifest.data_score * 100).toFixed(1)}%</dd>
+            <dd>{((manifest.data_score ?? 0) * 100).toFixed(1)}%</dd>
             <dt>PathScore</dt>
-            <dd>{(manifest.path_score * 100).toFixed(1)}%</dd>
+            <dd>{((manifest.path_score ?? 0) * 100).toFixed(1)}%</dd>
             <dt>TokenEfficiency</dt>
-            <dd>{(manifest.token_efficiency * 100).toFixed(1)}%</dd>
+            <dd>{((manifest.token_efficiency ?? 0) * 100).toFixed(1)}%</dd>
             <dt>Composite</dt>
-            <dd>{(manifest.composite * 100).toFixed(1)}%</dd>
+            <dd>{((manifest.composite ?? 0) * 100).toFixed(1)}%</dd>
             <dt>Walrus Blob</dt>
             <dd>
               <code>{manifest.walrus_blob_id || manifest.walrus_manifest_blob_id}</code>

@@ -19,6 +19,37 @@ def _app_module():
     return importlib.import_module("goldenmcp_eval_runner.app")
 
 
+class _FakeProc:
+    def __init__(self, returncode: int, stdout: str = "", stderr: str = ""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def _patch_inspect_subprocess(monkeypatch, *, raw: bytes = b'{"eval": "raw-log-bytes"}') -> None:
+    """Stub the per-eval subprocess + log read (the app spawns inspect_runner)."""
+    import json as _json
+
+    app_module = _app_module()
+    monkeypatch.setattr(
+        app_module.subprocess,
+        "run",
+        lambda *a, **k: _FakeProc(0, stdout=_json.dumps({"log_path": "/tmp/goldenmcp_lifi_quote.eval"})),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "read_inspect_log_file",
+        lambda path: ({"status": "success"}, raw),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "transcript_from_inspect_log",
+        lambda log_data, mcp, capability: __import__(
+            "goldenmcp_inspect.schemas", fromlist=["EvalTranscript"]
+        ).EvalTranscript(mcp=mcp, capability=capability),
+    )
+
+
 @pytest.fixture(autouse=True)
 def clear_stores():
     eval_jobs._jobs.clear()
@@ -176,21 +207,7 @@ def test_webhooks_cai_injects_run_id_from_query(client):
 
 def test_eval_inspect_query_params_backward_compat(client, monkeypatch):
     """Legacy query-param API still accepted alongside JSON body."""
-    app_module = _app_module()
-
-    fake_log = b'{"status":"success","results":{"samples":[]}}'
-
-    def fake_run_inspect(**kwargs):
-        return "/tmp/fake.eval", {"status": "success", "results": {"samples": []}}, fake_log
-
-    monkeypatch.setattr(app_module, "run_inspect_eval", fake_run_inspect)
-    monkeypatch.setattr(
-        app_module,
-        "transcript_from_inspect_log",
-        lambda log_data, mcp, capability: __import__(
-            "goldenmcp_inspect.schemas", fromlist=["EvalTranscript"]
-        ).EvalTranscript(mcp=mcp, capability=capability),
-    )
+    _patch_inspect_subprocess(monkeypatch)
 
     response = client.post(
         "/eval/inspect?mcp=lifi&capability=quote&model=openai/gpt-4o-mini",
@@ -203,11 +220,8 @@ def test_eval_inspect_query_params_backward_compat(client, monkeypatch):
 
 def test_eval_inspect_stores_log_bytes_for_publish(client, monkeypatch):
     app_module = _app_module()
-
     fake_log = b'{"eval": "raw-log-bytes"}'
-
-    def fake_run_inspect(**kwargs):
-        return "/tmp/goldenmcp_lifi_quote.eval", {"status": "success"}, fake_log
+    _patch_inspect_subprocess(monkeypatch, raw=fake_log)
 
     captured: dict = {}
 
@@ -223,14 +237,6 @@ def test_eval_inspect_stores_log_bytes_for_publish(client, monkeypatch):
             walrus_index_blob_id="index-blob",
         )
 
-    monkeypatch.setattr(app_module, "run_inspect_eval", fake_run_inspect)
-    monkeypatch.setattr(
-        app_module,
-        "transcript_from_inspect_log",
-        lambda log_data, mcp, capability: __import__(
-            "goldenmcp_inspect.schemas", fromlist=["EvalTranscript"]
-        ).EvalTranscript(mcp=mcp, capability=capability),
-    )
     monkeypatch.setattr(app_module, "publish_manifest_to_walrus", fake_publish)
 
     inspect_response = client.post(
