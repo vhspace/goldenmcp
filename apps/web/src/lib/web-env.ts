@@ -52,6 +52,18 @@ export function marketplaceUrl(): string {
   return url.replace(/\/$/, "");
 }
 
+export function webAgentUrl(): string {
+  const explicit = firstEnv("WEB_AGENT_URL", "WEB_AGENT_PUBLIC_URL");
+  if (explicit) return explicit.replace(/\/$/, "");
+  const host = firstEnv("WEB_AGENT_HOST") ?? "127.0.0.1";
+  const port = firstEnv("WEB_AGENT_PORT") ?? "8092";
+  return `http://${host}:${port}`;
+}
+
+export function webAgentApiKey(): string | undefined {
+  return firstEnv("WEB_AGENT_API_KEY");
+}
+
 /** Keys injected via next.config `env` for client + server bundles. */
 export function webEnvConfig(): Record<string, string> {
   const arc = arcRpcUrl();
@@ -69,5 +81,8 @@ export function webEnvConfig(): Record<string, string> {
     EVAL_RUNNER_URL: evalRunnerUrl(),
     EVAL_RUNNER_HOST: firstEnv("EVAL_RUNNER_HOST") ?? "127.0.0.1",
     EVAL_RUNNER_PORT: firstEnv("EVAL_RUNNER_PORT") ?? "8090",
+    WEB_AGENT_URL: webAgentUrl(),
+    WEB_AGENT_HOST: firstEnv("WEB_AGENT_HOST") ?? "127.0.0.1",
+    WEB_AGENT_PORT: firstEnv("WEB_AGENT_PORT") ?? "8092",
   };
 }
