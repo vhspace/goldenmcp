@@ -147,6 +147,13 @@ export async function fetchVendorProfiles(): Promise<VendorProfile[]> {
         } catch (err) {
           profile.ensError = err instanceof Error ? err.message : String(err);
         }
+        // TTL freshness: an expired ENSv2 subname identity has lapsed since its
+        // last eval (0 = never registered → not marked stale, just unregistered).
+        const expiry = await ensSubnameExpiry(profile.vendorName);
+        if (expiry !== null && expiry > 0) {
+          profile.ensExpiry = expiry;
+          profile.ensStale = expiry <= Math.floor(Date.now() / 1000);
+        }
       }
 
       try {
@@ -179,8 +186,8 @@ export async function resolveENS(name: string) {
   const rpc = firstEnv("NEXT_PUBLIC_ENS_RPC_URL", "ENS_RPC_URL");
   if (!rpc) throw new Error("NEXT_PUBLIC_ENS_RPC_URL is not set (also tried ENS_RPC_URL)");
   const { createPublicClient, http, namehash } = await import("viem");
-  const { mainnet } = await import("viem/chains");
-  const client = createPublicClient({ chain: mainnet, transport: http(rpc) });
+  const { sepolia } = await import("viem/chains");
+  const client = createPublicClient({ chain: sepolia, transport: http(rpc) });
   const resolver = await client.getEnsResolver({ name });
   if (!resolver) throw new Error(`No resolver for ${name}`);
   const node = namehash(name);
@@ -196,4 +203,47 @@ export async function resolveENS(name: string) {
     if (value) result[key] = value;
   }
   return result;
+}
+
+// Sepolia ENSv2 .eth registry — walked to find a parent's subregistry.
+const V2_ETH_REGISTRY =
+  process.env.NEXT_PUBLIC_ENS_V2_REGISTRY ?? "0xDEDB92913A25abE1f7BCDD85D8A344a43B398B67";
+
+/**
+ * Read an ENSv2 subname's TTL expiry by walking the registry hierarchy:
+ * .eth registry → getSubregistry(parentLabel) → findExpiry(childLabel).
+ * Returns the unix-seconds expiry, or null if the name isn't a 3-label
+ * `child.parent.eth` or has no subregistry. expiry === 0 means never registered.
+ */
+export async function ensSubnameExpiry(name: string): Promise<number | null> {
+  const rpc = firstEnv("NEXT_PUBLIC_ENS_RPC_URL", "ENS_RPC_URL");
+  if (!rpc) return null;
+  const labels = name.split(".");
+  if (labels.length !== 3 || labels[2] !== "eth") return null;
+  const [childLabel, parentLabel] = labels;
+  const { createPublicClient, http } = await import("viem");
+  const { sepolia } = await import("viem/chains");
+  const client = createPublicClient({ chain: sepolia, transport: http(rpc) });
+  const abi = parseAbi([
+    "function getSubregistry(string label) view returns (address)",
+    "function findExpiry(string label) view returns (uint64)",
+  ]);
+  try {
+    const subregistry = (await client.readContract({
+      address: V2_ETH_REGISTRY as `0x${string}`,
+      abi,
+      functionName: "getSubregistry",
+      args: [parentLabel],
+    })) as `0x${string}`;
+    if (BigInt(subregistry) === 0n) return null;
+    const expiry = (await client.readContract({
+      address: subregistry,
+      abi,
+      functionName: "findExpiry",
+      args: [childLabel],
+    })) as bigint;
+    return Number(expiry);
+  } catch {
+    return null;
+  }
 }

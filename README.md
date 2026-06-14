@@ -199,6 +199,17 @@ contracts/mcp-registry    ERC-8004-inspired MCP registry (Arc)
 
 Architecture overview: [docs/architecture.md](docs/architecture.md). All implementation plans: [docs/plans/](docs/plans/).
 
+## Deploy demo UI to Vercel (GH #106)
+
+The hackathon judge demo (`apps/web`) deploys to [Vercel](https://vercel.com) with **Root Directory** `apps/web`. Eval-runner and marketplace stay on existing infra; set their public URLs in Vercel env vars.
+
+Full checklist and variable list: [docs/plans/2026-06-13-vercel-deploy.md](docs/plans/2026-06-13-vercel-deploy.md).
+
+```bash
+# Local smoke (from apps/web)
+bun install && bun test && bun run build
+```
+
 ## License
 
 MIT

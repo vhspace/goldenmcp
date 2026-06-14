@@ -37,6 +37,10 @@ export interface VendorProfile {
   walrusBlobId: string;
   ensRecords: Record<string, string> | null;
   ensError: string | null;
+  // ENSv2 subname TTL: expiry timestamp (seconds) and whether it has lapsed.
+  // An expired identity stops resolving until the next eval renews it.
+  ensExpiry: number | null;
+  ensStale: boolean;
 }
 
 /** Thresholds documented in the demo UI legend (GH #80). */
@@ -105,6 +109,8 @@ export function aggregateVendorProfiles(entries: LeaderboardEntry[]): VendorProf
       walrusBlobId: primary.walrusBlobId,
       ensRecords: null,
       ensError: null,
+      ensExpiry: null,
+      ensStale: false,
     });
   }
 

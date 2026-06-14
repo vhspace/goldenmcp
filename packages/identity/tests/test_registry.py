@@ -1,6 +1,16 @@
 """Identity layer tests."""
 
-from goldenmcp_identity.registry import _format_bytes32, score_to_bps
+from goldenmcp_identity.registry import _format_bytes32, dns_encode, score_to_bps
+
+
+def test_dns_encode():
+    # Length-prefixed labels terminated by a zero root byte (DNS wire format),
+    # as consumed by UniversalResolver.findResolver.
+    assert dns_encode("goldenmcp.eth").hex() == "09676f6c64656e6d63700365746800"
+    assert dns_encode("lifi-quote.goldenmcp.eth").hex() == (
+        "0a6c6966692d71756f746509676f6c64656e6d63700365746800"
+    )
+    assert dns_encode("eth").hex() == "0365746800"
 
 
 def test_score_to_bps_clamps():

@@ -98,6 +98,38 @@ ENS_RESOLVER_ABI = [
     }
 ]
 
+# UniversalResolver V2 — single entry point that walks the ENSv2 hierarchical
+# registry and returns the resolver for a (DNS-encoded) name. Same address on
+# mainnet and Sepolia. Overridable via ENS_UNIVERSAL_RESOLVER.
+DEFAULT_UNIVERSAL_RESOLVER = "0xeEeEEEeE14D718C2B47D9923Deab1335E144EeEe"
+
+UNIVERSAL_RESOLVER_ABI = [
+    {
+        "inputs": [{"name": "name", "type": "bytes"}],
+        "name": "findResolver",
+        "outputs": [
+            {"name": "resolver", "type": "address"},
+            {"name": "node", "type": "bytes32"},
+            {"name": "offset", "type": "uint256"},
+        ],
+        "stateMutability": "view",
+        "type": "function",
+    }
+]
+
+
+def dns_encode(name: str) -> bytes:
+    """Encode an ENS name to DNS wire format (length-prefixed labels + root)."""
+    out = bytearray()
+    for label in name.split("."):
+        raw = label.encode("utf-8")
+        if len(raw) > 255:
+            raise ValueError(f"label too long: {label}")
+        out.append(len(raw))
+        out.extend(raw)
+    out.append(0)
+    return bytes(out)
+
 
 class IdentitySettings(BaseSettings):
     arc_rpc_url: str = ""
@@ -227,25 +259,41 @@ class RegistryClient:
 
 
 class ENSClient:
-    """Resolve ENS text records via Ethereum RPC."""
+    """Resolve ENS text records via the UniversalResolver V2.
 
-    def __init__(self, rpc_url: str | None = None):
+    Bypasses web3.py's ``w3.ens`` helpers, which are hard-wired to the mainnet
+    ENSv1 registry and cannot walk the ENSv2 hierarchical registry on Sepolia.
+    Instead we ask the UniversalResolver V2 to ``findResolver`` for the name,
+    then call ``text(node, key)`` on the resolver it returns — the same path
+    viem's ``getEnsText`` uses.
+    """
+
+    def __init__(self, rpc_url: str | None = None, universal_resolver: str | None = None):
         url = rpc_url or os.environ.get("ENS_RPC_URL", "")
         if not url:
             raise EnvironmentError("ENS_RPC_URL is required")
         self.w3 = Web3(Web3.HTTPProvider(url))
         if not self.w3.is_connected():
             raise ConnectionError(f"Cannot connect to ENS RPC: {url}")
+        ur = universal_resolver or os.environ.get(
+            "ENS_UNIVERSAL_RESOLVER", DEFAULT_UNIVERSAL_RESOLVER
+        )
+        self.universal_resolver = self.w3.eth.contract(
+            address=Web3.to_checksum_address(ur),
+            abi=UNIVERSAL_RESOLVER_ABI,
+        )
 
     def resolve_text(self, name: str, key: str) -> str:
-        """Resolve ENS text record via universal resolver."""
-        # Use eth_call to universal resolver - simplified via namehash + public resolver
-        node = self.w3.ens.namehash(name)
-        resolver = self.w3.ens.get_resolver(name)
-        if resolver is None:
+        resolver_addr, node, _ = self.universal_resolver.functions.findResolver(
+            dns_encode(name)
+        ).call()
+        if int(resolver_addr, 16) == 0:
             raise LookupError(f"No resolver for ENS name: {name}")
-        text_fn = resolver.functions.text(node, key)
-        return text_fn.call()
+        resolver = self.w3.eth.contract(
+            address=Web3.to_checksum_address(resolver_addr),
+            abi=ENS_RESOLVER_ABI,
+        )
+        return resolver.functions.text(node, key).call()
 
     def resolve_agent_context(self, name: str) -> dict[str, Any]:
         raw = self.resolve_text(name, "agent-context")

@@ -144,6 +144,16 @@ export function VendorPerformanceCard({ vendor }: { vendor: VendorProfile }) {
           ENS verified · {Object.keys(vendor.ensRecords).join(", ")}
         </p>
       )}
+      {vendor.ensExpiry !== null &&
+        (vendor.ensStale ? (
+          <p style={{ color: "#fbbf24", fontSize: "0.75rem", marginTop: "0.5rem" }}>
+            ENS identity stale · expired {new Date(vendor.ensExpiry * 1000).toLocaleDateString()} — awaiting re-eval
+          </p>
+        ) : (
+          <p style={{ color: "#94a3b8", fontSize: "0.75rem", marginTop: "0.5rem" }}>
+            ENS fresh until {new Date(vendor.ensExpiry * 1000).toLocaleDateString()}
+          </p>
+        ))}
 
       <footer style={{ marginTop: "auto", paddingTop: "1rem" }}>
         <Link
