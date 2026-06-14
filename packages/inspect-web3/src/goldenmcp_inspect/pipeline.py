@@ -73,12 +73,19 @@ def publish_manifest_to_walrus(
     filesystem: WalrusFileSystem | None = None,
 ) -> WalrusUploadResult:
     """Upload Inspect eval log bytes and public manifest JSON to Walrus."""
-    eval_walrus_path = inspect_log_path or inspect_eval_log_path(
-        manifest.mcp,
-        manifest.capability,
-        run_id=manifest.run_id,
-        created_at=manifest.created_at,
-    )
+    # inspect_log_path may override the destination, but only if it is already a
+    # walrus:// logical path. A local filesystem path (e.g. /opt/.../run.eval from
+    # the eval-runner) must NOT become the stored ref — always derive the indexed
+    # walrus:// path so the manifest's walrus_blob_id stays resolvable.
+    if inspect_log_path and inspect_log_path.startswith("walrus://"):
+        eval_walrus_path = inspect_log_path
+    else:
+        eval_walrus_path = inspect_eval_log_path(
+            manifest.mcp,
+            manifest.capability,
+            run_id=manifest.run_id,
+            created_at=manifest.created_at,
+        )
 
     if inspect_log_bytes is not None:
         log_bytes = inspect_log_bytes
