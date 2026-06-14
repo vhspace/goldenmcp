@@ -7,7 +7,18 @@ staging-simulate:
     config-path: ./config.staging-simulate.json
     secrets-path: ./secrets.yaml
 
-# Remote DO eval-runner: real Inspect on lifi/quote, CAI/Arc skipped until configured.
+# Local async dev: local eval-runner + local HTTP trigger (localhost:2000), CAI
+# callback path, Arc skipped. For verifying handler B end-to-end on one machine.
+staging-local:
+  user-workflow:
+    workflow-name: goldenmcp-eval-pipeline
+  workflow-artifacts:
+    workflow-path: ./src/workflow.ts
+    config-path: ./config.staging-local.json
+    secrets-path: ./secrets.yaml
+
+# Remote DO eval-runner: real Inspect on lifi/quote, async CAI attestation via the
+# workflow's own HTTP trigger (creCallbackUrl), Arc write to the live registry.
 staging-do:
   user-workflow:
     workflow-name: goldenmcp-eval-pipeline

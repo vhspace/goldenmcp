@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from goldenmcp_eval_runner.auth import require_api_key, require_cai_webhook_secret
 from goldenmcp_eval_runner.inspect_logs import read_inspect_log_file
 from goldenmcp_eval_runner.jobs import EvalJob, eval_jobs, JobStatus
-from goldenmcp_eval_runner.pending_runs import cai_callbacks
+from goldenmcp_eval_runner.pending_runs import cai_callbacks, inference_index
 from goldenmcp_eval_runner.settings import RunnerSettings, get_settings
 from goldenmcp_inspect.benchmarks import list_benchmarks, load_benchmark
 from goldenmcp_inspect.manifest import transcript_from_inspect_log
@@ -72,7 +72,9 @@ class EvalResponse(BaseModel):
 
 
 class PublishRequest(BaseModel):
-    run_id: str
+    # Identify the run by run_id, or by the CAI inference_id (resolved via the index).
+    run_id: str | None = None
+    inference_id: str | None = None
     attestation: dict[str, Any] | None = None
     manifest: dict[str, Any] | None = None
     inspect_log_bytes_b64: str | None = None
@@ -80,10 +82,19 @@ class PublishRequest(BaseModel):
 
 class PublishResponse(BaseModel):
     run_id: str
+    mcp: str
+    capability: str
     manifest: dict[str, Any]
     walrus_manifest_blob_id: str
     walrus_eval_blob_id: str
     walrus_index_blob_id: str | None = None
+
+
+class CaiSubmittedRequest(BaseModel):
+    """Handler A registers the CAI inference_id -> run_id mapping after submitting."""
+
+    inference_id: str
+    run_id: str
 
 
 class CaiWebhookBody(BaseModel):
@@ -523,7 +534,22 @@ def trigger_inspect_eval(
     dependencies=[Depends(require_api_key)],
 )
 def publish_eval(request: PublishRequest):
-    """Queue Walrus upload for a scored run; poll GET /eval/runs/{run_id} until published or failed."""
+    """Queue Walrus upload for a scored run; poll GET /eval/runs/{run_id} until published or failed.
+
+    The run is identified by run_id, or by the CAI inference_id (resolved via the
+    inference index — handler B only has the CAI status, not the run_id).
+    """
+    if not request.run_id and request.inference_id:
+        resolved = inference_index.get(request.inference_id)
+        if resolved is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no run mapped to inference_id={request.inference_id!r} — was /eval/cai-submitted called?",
+            )
+        request.run_id = resolved
+    if not request.run_id:
+        raise HTTPException(status_code=400, detail="run_id or inference_id required")
+
     job = _resolve_publish_job(request)
     if job is None:
         raise HTTPException(
@@ -536,6 +562,8 @@ def publish_eval(request: PublishRequest):
             raise HTTPException(status_code=500, detail="published job missing walrus fields")
         return PublishResponse(
             run_id=job.run_id,
+            mcp=job.mcp,
+            capability=job.capability,
             manifest=job.manifest.to_public_dict(),
             walrus_manifest_blob_id=job.walrus_manifest_blob_id,
             walrus_eval_blob_id=job.walrus_eval_blob_id,
@@ -585,6 +613,26 @@ def publish_eval(request: PublishRequest):
         status_code=202,
         content=JobAcceptedResponse(run_id=request.run_id, status=JobStatus.PUBLISHING).model_dump(),
     )
+
+
+@app.post(
+    "/eval/cai-submitted",
+    dependencies=[Depends(require_api_key)],
+)
+def cai_submitted(request: CaiSubmittedRequest):
+    """Record a CAI inference_id -> run_id mapping (handler A, right after submit).
+
+    The CRE HTTP-trigger payload carries only the CAI status, so the inference id
+    in that status is the only handle back to the run. /eval/publish resolves it.
+    """
+    inference_index.put(request.inference_id, request.run_id)
+    logger.info(
+        "cai-submitted inference_id=%s run_id=%s mapped=%d",
+        request.inference_id,
+        request.run_id,
+        len(inference_index),
+    )
+    return {"status": "ok", "inference_id": request.inference_id, "run_id": request.run_id}
 
 
 @app.post(

@@ -6,9 +6,10 @@ import {MCPRegistry} from "../src/MCPRegistry.sol";
 
 contract MCPRegistryTest is Test {
     MCPRegistry registry;
+    address forwarder = address(0xF0);
 
     function setUp() public {
-        registry = new MCPRegistry();
+        registry = new MCPRegistry(forwarder);
     }
 
     function test_register_mcp() public {
@@ -48,5 +49,40 @@ contract MCPRegistryTest is Test {
         MCPRegistry.MCPRecord memory rec = registry.getRecord(id);
         assertEq(rec.lastAttestationId, "019ea31f-0563");
         assertEq(rec.lastTranscriptHash, transcriptHash);
+    }
+
+    function test_onReport_attestation_via_forwarder() public {
+        uint256 id = registry.register("lifi", "https://mcp.lifi.io", "walrus://x", "lifi.goldenmcp.eth");
+        bytes32 transcriptHash = bytes32(uint256(0x4e5a));
+        bytes memory report = abi.encode(uint8(2), id, "019ec38b-6228", transcriptHash);
+        vm.prank(forwarder);
+        registry.onReport("", report);
+        MCPRegistry.MCPRecord memory rec = registry.getRecord(id);
+        assertEq(rec.lastAttestationId, "019ec38b-6228");
+        assertEq(rec.lastTranscriptHash, transcriptHash);
+    }
+
+    function test_onReport_score_via_forwarder() public {
+        uint256 id = registry.register("lifi", "https://mcp.lifi.io", "walrus://x", "lifi.goldenmcp.eth");
+        bytes memory report =
+            abi.encode(uint8(1), id, "quote", uint16(9200), uint16(8500), uint16(7000), uint16(8600), false, "blob-xyz");
+        vm.prank(forwarder);
+        registry.onReport("", report);
+        MCPRegistry.CapabilityScore memory score = registry.getCapabilityScore(id, "quote");
+        assertEq(score.compositeBps, 8600);
+        assertEq(score.walrusBlobId, "blob-xyz");
+    }
+
+    function test_supportsInterface() public view {
+        assertTrue(registry.supportsInterface(0x01ffc9a7)); // ERC-165
+        assertTrue(registry.supportsInterface(MCPRegistry.onReport.selector)); // IReceiver
+        assertFalse(registry.supportsInterface(0xffffffff));
+    }
+
+    function test_onReport_rejects_non_forwarder() public {
+        uint256 id = registry.register("lifi", "https://mcp.lifi.io", "walrus://x", "lifi.goldenmcp.eth");
+        bytes memory report = abi.encode(uint8(2), id, "x", bytes32(uint256(1)));
+        vm.expectRevert(abi.encodeWithSelector(MCPRegistry.UnauthorizedForwarder.selector, address(this)));
+        registry.onReport("", report);
     }
 }

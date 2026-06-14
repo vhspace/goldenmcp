@@ -1,23 +1,23 @@
 {
   "schedule": "0 */6 * * *",
-  "evalRunnerUrl": "http://165.227.74.149",
-  "evalRunnerApiKey": "",
+  "evalRunnerUrl": "http://localhost:8090",
+  "evalRunnerApiKey": "dev-key",
   "chainlinkCaiUrl": "https://confidential-ai-dev-preview.cldev.cloud",
-  "creCallbackUrl": "http://165.227.74.149:2000/trigger",
+  "creCallbackUrl": "http://localhost:2000/trigger",
   "authorizedKeys": [],
   "walrusAggregatorUrl": "https://aggregator.walrus-testnet.walrus.space",
-  "arcRegistryAddress": "0x8db02877046c8fA3c8c6Abb2565094Ca29E820e3",
+  "arcRegistryAddress": "",
   "arcChainSelector": "arc-testnet",
   "defaultAgentId": 1,
-  "useScoreOnly": false,
+  "useScoreOnly": true,
   "pollBusyWait": true,
   "benchmarkAllowlist": [
     "lifi/quote"
   ],
   "caiPollMaxAttempts": 60,
   "caiPollIntervalMs": 2000,
-  "inspectPollMaxAttempts": 300,
+  "inspectPollMaxAttempts": 120,
   "inspectPollIntervalMs": 2000,
-  "publishPollMaxAttempts": 8,
-  "publishPollIntervalMs": 6000
+  "publishPollMaxAttempts": 60,
+  "publishPollIntervalMs": 2000
 }
