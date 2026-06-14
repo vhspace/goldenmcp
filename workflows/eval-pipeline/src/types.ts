@@ -61,6 +61,7 @@ export interface ScoreManifest {
   attestation?: CaiAttestation | null;
   walrus_manifest_blob_id?: string | null;
   walrus_blob_id?: string | null;
+  walrus_index_blob_id?: string | null;
 }
 
 export interface PipelineResult {
