@@ -218,7 +218,17 @@ workflows/eval-pipeline   Chainlink CRE workflow
 contracts/mcp-registry    ERC-8004-inspired MCP registry (Arc)
 ```
 
-Architecture overview: [docs/architecture.md](docs/architecture.md). All implementation plans: [docs/plans/](docs/plans/).
+Architecture overview: [docs/architecture.md](docs/architecture.md).
+
+### Planning artifacts (for judges)
+
+This project was built spec-first. The full set of implementation plans / planning artifacts is in [`agent-plans/`](agent-plans/):
+
+- [GoldenMCP eval marketplace](agent-plans/2026-06-12-goldenmcp-eval-marketplace.md) — the core spec: evals → scoring → Walrus → attestation → Arc registry → x402 lookup.
+- [DO eval-runner (Terraform)](agent-plans/2026-06-13-do-eval-runner-terraform.md) — eval-runner HTTP service infra the CRE workflow calls.
+- [Vercel deploy](agent-plans/2026-06-13-vercel-deploy.md) — judge-facing web demo deployment.
+- [Web concierge agent](agent-plans/2026-06-13-web-concierge-agent.md) — the agent-driven demo flow.
+- [Landing page](agent-plans/2026-06-13-landing-page.md) — marketing/landing surface.
 
 ## Deploy demo UI to Vercel (GH #106)
 
