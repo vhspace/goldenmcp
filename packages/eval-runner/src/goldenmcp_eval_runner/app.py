@@ -16,10 +16,16 @@ from fastapi import Body, Depends, FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from goldenmcp_eval_runner.agent_resolver import resolve_agent_id
 from goldenmcp_eval_runner.auth import require_api_key, require_cai_webhook_secret
 from goldenmcp_eval_runner.inspect_logs import read_inspect_log_file
 from goldenmcp_eval_runner.jobs import EvalJob, eval_jobs, JobStatus
-from goldenmcp_eval_runner.pending_runs import cai_callbacks, inference_index
+from goldenmcp_eval_runner.pending_runs import (
+    benchmark_cursor,
+    cai_callbacks,
+    inference_index,
+    manifest_pairs,
+)
 from goldenmcp_eval_runner.settings import RunnerSettings, get_settings
 from goldenmcp_inspect.benchmarks import list_benchmarks, load_benchmark
 from goldenmcp_inspect.manifest import transcript_from_inspect_log
@@ -95,6 +101,23 @@ class CaiSubmittedRequest(BaseModel):
 
     inference_id: str
     run_id: str
+
+
+class PairRequest(BaseModel):
+    """Handler A records one model's scored run for a benchmark; the pair of
+    open-weight model runs is submitted to one CAI judge once both arrive."""
+
+    mcp: str
+    capability: str
+    model: str
+    run_id: str
+    models_total: int = 2
+
+
+class PairResponse(BaseModel):
+    complete: bool
+    # When complete: {model -> run_id} for all models of this benchmark.
+    runs: dict[str, str] = Field(default_factory=dict)
 
 
 class CaiWebhookBody(BaseModel):
@@ -414,6 +437,39 @@ def benchmarks():
     return {"benchmarks": [{"mcp": m, "capability": c} for m, c in list_benchmarks()]}
 
 
+@app.get("/agent-id")
+def agent_id(mcp: str):
+    """Resolve an MCP name to its onchain agent id (nameToAgentId), or 0 if unset.
+
+    Handler B uses this to write the score/attestation to the correct agent after
+    it resolves the run's MCP from the CAI inference id.
+    """
+    settings = get_settings()
+    return {"mcp": mcp, "agent_id": resolve_agent_id(mcp, settings.arc_rpc_url, settings.arc_registry_address)}
+
+
+@app.get("/benchmarks/next")
+def benchmarks_next():
+    """Return the next (benchmark × model) pair in the round-robin and advance.
+
+    The CRE cron handler runs ONE (benchmark, model) per fire (one live Inspect
+    eval ~ the per-execution HTTP cap); calling this each fire cycles through all
+    benchmarks across both open-weight models, emitting a benchmark's two models
+    back-to-back so the eval-runner can pair their manifests for one CAI judge.
+    """
+    items = list_benchmarks()
+    if not items:
+        raise HTTPException(status_code=404, detail="no benchmarks available")
+    pair = benchmark_cursor.next_pair(items)
+    # Resolve this MCP's onchain agent id so the score writes to the right agent
+    # (best-effort; 0 -> the workflow uses its defaultAgentId).
+    settings = get_settings()
+    pair["agent_id"] = resolve_agent_id(
+        str(pair["mcp"]), settings.arc_rpc_url, settings.arc_registry_address
+    )
+    return pair
+
+
 @app.get(
     "/eval/runs/{run_id}",
     dependencies=[Depends(require_api_key)],
@@ -613,6 +669,28 @@ def publish_eval(request: PublishRequest):
         status_code=202,
         content=JobAcceptedResponse(run_id=request.run_id, status=JobStatus.PUBLISHING).model_dump(),
     )
+
+
+@app.post(
+    "/eval/pair",
+    response_model=PairResponse,
+    dependencies=[Depends(require_api_key)],
+)
+def eval_pair(request: PairRequest):
+    """Record one model's scored run for a benchmark; report when the pair is complete.
+
+    Handler A calls this after each (benchmark, model) score. The first model parks
+    and gets complete=false; the second returns complete=true with {model: run_id}
+    for both, which handler A then submits as a two-manifest CAI inference.
+    """
+    manifest_pairs.record(request.mcp, request.capability, request.model, request.run_id)
+    runs = manifest_pairs.complete_and_clear(request.mcp, request.capability, request.models_total)
+    if runs is None:
+        return PairResponse(complete=False)
+    logger.info(
+        "eval/pair complete %s/%s models=%s", request.mcp, request.capability, list(runs.keys())
+    )
+    return PairResponse(complete=True, runs=runs)
 
 
 @app.post(

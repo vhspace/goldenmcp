@@ -11,9 +11,7 @@
   "defaultAgentId": 1,
   "useScoreOnly": false,
   "pollBusyWait": true,
-  "benchmarkAllowlist": [
-    "lifi/quote"
-  ],
+  "rotateBenchmarks": true,
   "caiPollMaxAttempts": 60,
   "caiPollIntervalMs": 2000,
   "inspectPollMaxAttempts": 300,
