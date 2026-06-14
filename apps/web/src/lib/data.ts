@@ -217,8 +217,8 @@ export async function resolveENS(name: string) {
   const rpc = process.env.NEXT_PUBLIC_ENS_RPC_URL;
   if (!rpc) throw new Error("NEXT_PUBLIC_ENS_RPC_URL is not set");
   const { createPublicClient, http, namehash } = await import("viem");
-  const { mainnet } = await import("viem/chains");
-  const client = createPublicClient({ chain: mainnet, transport: http(rpc) });
+  const { sepolia } = await import("viem/chains");
+  const client = createPublicClient({ chain: sepolia, transport: http(rpc) });
   const resolver = await client.getEnsResolver({ name });
   if (!resolver) throw new Error(`No resolver for ${name}`);
   const node = namehash(name);
