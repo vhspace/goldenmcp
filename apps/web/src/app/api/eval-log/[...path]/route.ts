@@ -1,25 +1,32 @@
 import { fetchManifest, resolveEvalLogUrl } from "@/lib/data";
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
 /**
  * Stream the raw Inspect `.eval` log (a ZIP archive) for an MCP/capability.
  *
- * The Inspect bundled log viewer loads a log via its `?log_file=<url>` param.
- * We serve the bytes same-origin here so the viewer fetches without CORS and
- * so the manifest's `walrus://` indexed-path is resolved server-side.
+ * The Inspect bundled viewer picks its parser by file extension — it only treats
+ * the bytes as a ZIP when the URL ends in `.eval`, else it JSON-parses (and chokes
+ * on the ZIP's `PK` magic). So the path must end in `.eval`, not a query string:
  *
- * GET /api/eval-log?mcp=<name>&capability=<cap>
+ *   GET /api/eval-log/<mcp>/<capability>.eval
  */
-export async function GET(request: NextRequest) {
-  const mcp = request.nextUrl.searchParams.get("mcp");
-  const capability = request.nextUrl.searchParams.get("capability");
-  if (!mcp || !capability) {
+export async function GET(
+  _request: Request,
+  context: { params: Promise<{ path: string[] }> },
+) {
+  const { path } = await context.params;
+  if (!Array.isArray(path) || path.length !== 2) {
     return NextResponse.json(
-      { error: "mcp and capability query params required" },
+      { error: "expected /api/eval-log/<mcp>/<capability>.eval" },
       { status: 400 },
     );
+  }
+  const mcp = path[0];
+  const capability = path[1].replace(/\.eval$/, "");
+  if (!mcp || !capability) {
+    return NextResponse.json({ error: "mcp and capability required" }, { status: 400 });
   }
   try {
     const manifest = await fetchManifest(mcp, capability);

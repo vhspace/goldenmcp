@@ -30,15 +30,16 @@ export default async function EvalViewerPage({
     error = e instanceof Error ? e.message : String(e);
   }
 
-  // Same-origin proxy so the Inspect viewer can fetch the .eval without CORS
-  // and so walrus:// indexed paths resolve server-side. Must be ABSOLUTE — the
-  // bundled viewer treats a relative log_file as relative to its own logs/ dir.
+  // Same-origin proxy so the Inspect viewer can fetch the .eval without CORS and
+  // so walrus:// indexed paths resolve server-side. The URL must be ABSOLUTE (the
+  // viewer treats a relative log_file as relative to its own logs/ dir) and must
+  // END IN .eval (the viewer picks ZIP vs JSON parsing by extension).
   const h = await headers();
   const proto = h.get("x-forwarded-proto") ?? "https";
   const host = h.get("host") ?? "";
-  const proxyLogUrl = `${proto}://${host}/api/eval-log?mcp=${encodeURIComponent(
+  const proxyLogUrl = `${proto}://${host}/api/eval-log/${encodeURIComponent(
     mcp,
-  )}&capability=${encodeURIComponent(capability)}`;
+  )}/${encodeURIComponent(capability)}.eval`;
   const viewerSrc = `${inspectViewerBase()}?log_file=${encodeURIComponent(proxyLogUrl)}`;
 
   return (
