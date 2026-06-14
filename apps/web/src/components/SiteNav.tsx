@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { GoldenMcpLogo } from "@/components/GoldenMcpLogo";
 
 const LINKS = [
   { href: "/demo", label: "Marketplace" },
@@ -19,7 +18,12 @@ export function SiteNav() {
         flexWrap: "wrap",
       }}
     >
-      <GoldenMcpLogo size="sm" />
+      <Link
+        href="/"
+        style={{ color: "#f5f5f5", textDecoration: "none", fontWeight: 700, letterSpacing: "-0.02em" }}
+      >
+        Golden<span style={{ color: "#c5a059" }}>MCP</span>
+      </Link>
       {LINKS.map((link) => (
         <Link key={link.href} href={link.href} style={{ color: "#aaa", textDecoration: "none" }}>
           {link.label}

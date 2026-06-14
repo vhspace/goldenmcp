@@ -12,40 +12,30 @@ import type { PipelineRunState } from "@/lib/pipeline";
 import { createInitialPipelineState } from "@/lib/pipeline";
 import { runDemoPipeline } from "@/lib/run-demo-pipeline";
 import { FlightTracker } from "@/components/FlightTracker";
+import styles from "@/components/demo/demo-dashboard.module.css";
 
 function IntentSummary({ intent }: { intent: ParsedIntent }) {
   return (
-    <div
-      style={{
-        marginTop: "1rem",
-        padding: "1.25rem",
-        background: "#0d0d14",
-        border: "1px solid #3b3b50",
-        borderRadius: "10px",
-      }}
-    >
-      <h3 style={{ margin: "0 0 1rem", fontSize: "1rem", color: "#ccc" }}>Parsed Intent</h3>
-      <dl style={{ margin: 0, display: "grid", gridTemplateColumns: "160px 1fr", gap: "0.6rem 1rem" }}>
-        <dt style={{ color: "#888", margin: 0 }}>Action</dt>
-        <dd style={{ margin: 0 }}>{intent.action}</dd>
-        <dt style={{ color: "#888", margin: 0 }}>Assets</dt>
-        <dd style={{ margin: 0 }}>{formatAssets(intent.assetsFrom, intent.assetsTo)}</dd>
-        {intent.amountUsd !== null && (
-          <>
-            <dt style={{ color: "#888", margin: 0 }}>Amount</dt>
-            <dd style={{ margin: 0 }}>${intent.amountUsd.toLocaleString()}</dd>
-          </>
-        )}
-        <dt style={{ color: "#888", margin: 0 }}>Target Minimum Reliability Score</dt>
-        <dd style={{ margin: 0 }}>{formatMinReliability(intent.minReliabilityScore)}</dd>
-        <dt style={{ color: "#888", margin: 0 }}>Objective</dt>
-        <dd style={{ margin: 0 }}>{intent.objective}</dd>
-        <dt style={{ color: "#888", margin: 0 }}>Marketplace capability</dt>
-        <dd style={{ margin: 0 }}>
-          <code>{intent.marketplaceCapability}</code>
-        </dd>
-      </dl>
-    </div>
+    <dl className={styles.intentGrid}>
+      <dt>Action</dt>
+      <dd>{intent.action}</dd>
+      <dt>Assets</dt>
+      <dd>{formatAssets(intent.assetsFrom, intent.assetsTo)}</dd>
+      {intent.amountUsd !== null && (
+        <>
+          <dt>Amount</dt>
+          <dd>${intent.amountUsd.toLocaleString()}</dd>
+        </>
+      )}
+      <dt>Min reliability</dt>
+      <dd>{formatMinReliability(intent.minReliabilityScore)}</dd>
+      <dt>Objective</dt>
+      <dd>{intent.objective}</dd>
+      <dt>Capability</dt>
+      <dd>
+        <code>{intent.marketplaceCapability}</code>
+      </dd>
+    </dl>
   );
 }
 
@@ -97,22 +87,26 @@ export function ExecutionSandbox() {
   }
 
   return (
-    <section style={{ marginBottom: "3rem" }}>
-      <header style={{ marginBottom: "1.25rem" }}>
-        <h2 style={{ margin: 0, fontSize: "1.35rem" }}>Execution Sandbox</h2>
-        <p style={{ color: "#aaa", marginTop: "0.35rem", maxWidth: "48rem" }}>
-          User @Permit trade intent → Marketplace MCP (lifi / 1inch) → x402 price gate → USDC settlement on Arc.
-          Click a demo prompt and start the use-case workflow with live flight tracking.
-        </p>
-      </header>
+    <section className={styles.panel}>
+      <div className={styles.segmentRow}>
+        <div className={styles.segments} role="tablist" aria-label="Workflow mode">
+          <span className={styles.segment}>Inspect</span>
+          <span className={styles.segmentActive}>Marketplace</span>
+          <span className={styles.segment}>x402</span>
+        </div>
+        <div className={styles.filters}>
+          <span className={styles.filterChip}>lifi</span>
+          <span className={styles.filterChip}>1inch</span>
+          <span className={styles.filterChip}>min score ≥ 0.90</span>
+        </div>
+      </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-          gap: "1rem",
-        }}
-      >
+      <h2 className={styles.panelTitle}>Execution Sandbox</h2>
+      <p className={styles.panelSub}>
+        User @Permit trade intent → Marketplace MCP → x402 price gate → USDC settlement on Arc.
+      </p>
+
+      <div className={styles.promptGrid}>
         {DEMO_PROMPTS.map((prompt) => {
           const active = selectedPrompt === prompt.text;
           return (
@@ -120,17 +114,7 @@ export function ExecutionSandbox() {
               key={prompt.id}
               type="button"
               onClick={() => selectPrompt(prompt.text)}
-              style={{
-                textAlign: "left",
-                padding: "1rem",
-                borderRadius: "10px",
-                border: active ? "1px solid #7eb8ff" : "1px solid #2a2a38",
-                background: active ? "#12182a" : "#101018",
-                color: "#e8e8ef",
-                cursor: "pointer",
-                fontSize: "0.95rem",
-                lineHeight: 1.45,
-              }}
+              className={active ? styles.promptBtnActive : styles.promptBtn}
             >
               {prompt.text}
             </button>
@@ -138,11 +122,7 @@ export function ExecutionSandbox() {
         })}
       </div>
 
-      {parseError && (
-        <p style={{ color: "#f87171", marginTop: "1rem", fontFamily: "monospace", fontSize: "0.85rem" }}>
-          Intent parse error: {parseError}
-        </p>
-      )}
+      {parseError && <p className={styles.parseError}>Intent parse error: {parseError}</p>}
 
       {intent && (
         <>
@@ -151,16 +131,7 @@ export function ExecutionSandbox() {
             type="button"
             onClick={handleStartWorkflow}
             disabled={loading}
-            style={{
-              marginTop: "1rem",
-              padding: "0.75rem 1.5rem",
-              borderRadius: "8px",
-              border: "none",
-              background: loading ? "#444" : "#7eb8ff",
-              color: "#0a0a0f",
-              fontWeight: 600,
-              cursor: loading ? "wait" : "pointer",
-            }}
+            className={styles.primaryBtn}
           >
             {loading ? "Running pipeline…" : "Start Workflow"}
           </button>

@@ -81,6 +81,18 @@
   display: block;
 }
 
+.brand {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #f5f5f5;
+  text-decoration: none;
+}
+
+.brandAccent {
+  color: #c5a059;
+}
+
 .navLinks {
   display: none;
   align-items: center;

@@ -6,8 +6,9 @@ import { SiteNav } from "@/components/SiteNav";
 export function LayoutShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isLanding = pathname === "/";
+  const isDemo = pathname === "/demo" || pathname.startsWith("/demo/");
 
-  if (isLanding) {
+  if (isLanding || isDemo) {
     return <>{children}</>;
   }
 

@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { GoldenMcpLogo } from "@/components/GoldenMcpLogo";
 import {
   LANDING_CTA,
   LANDING_FEATURES,
@@ -19,7 +18,9 @@ export function LandingPage() {
       <div className={styles.arcRight} aria-hidden />
 
       <header className={styles.navBar}>
-        <GoldenMcpLogo size="md" className={styles.logoImage} priority />
+        <Link href="/" className={styles.brand}>
+          Golden<span className={styles.brandAccent}>MCP</span>
+        </Link>
         <nav className={styles.navLinks} aria-label="Primary">
           {LANDING_NAV.map((link) =>
             link.href.startsWith("#") ? (
