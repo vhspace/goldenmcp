@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "bun test tests/"
+    "test": "bun test tests/",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install chromium"
   },
   "dependencies": {
     "next": "^15.0.0",
@@ -15,6 +17,7 @@
     "viem": "^2.21.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "typescript": "^5.6.0"
