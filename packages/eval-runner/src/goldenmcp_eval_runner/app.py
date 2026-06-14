@@ -334,6 +334,12 @@ def _run_inspect_job(run_id: str, request: InspectEvalRequest, settings: RunnerS
 
     transcript = transcript_from_inspect_log(log_data, request.mcp, request.capability)
     manifest = score_transcript_to_manifest(transcript, run_id=run_id)
+    # Embed wall-clock latency from the Inspect log so the frontend doesn't have
+    # to unzip the zstd .eval to read stats.total_time.
+    stats = log_data.get("stats") if isinstance(log_data, dict) else None
+    total_time = stats.get("total_time") if isinstance(stats, dict) else None
+    if isinstance(total_time, (int, float)) and total_time > 0:
+        manifest.latency_ms = round(total_time * 1000)
     eval_jobs.update(
         run_id,
         status=JobStatus.SCORED,
