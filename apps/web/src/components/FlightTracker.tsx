@@ -22,14 +22,30 @@ function StepDetail({ step }: { step: PipelineStepState }) {
 
   const d = step.detail;
 
-  if (step.id === "ens_discovery" && typeof d.summary === "string") {
+  if (step.id === "user_trade_intent" && typeof d.summary === "string") {
     return (
       <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "#aaa" }}>
         <p style={{ margin: 0, color: "#6ee7a8" }}>{d.summary}</p>
-        {d.ensRecords && typeof d.ensRecords === "object" ? (
+        {d.permit ? (
+          <p style={{ margin: "0.25rem 0 0", color: "#888" }}>
+            {String(d.permit)} · min score {String(d.minReliabilityScore ?? "?")}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (step.id === "marketplace_mcp" && typeof d.summary === "string") {
+    const candidates = Array.isArray(d.candidates) ? d.candidates : [];
+    return (
+      <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "#aaa" }}>
+        <p style={{ margin: 0, color: "#6ee7a8" }}>{d.summary}</p>
+        {candidates.length > 0 ? (
           <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1.1rem" }}>
-            {Object.keys(d.ensRecords as Record<string, string>).map((key) => (
-              <li key={key}>{key}</li>
+            {candidates.map((c: Record<string, unknown>) => (
+              <li key={String(c.mcp)}>
+                {String(c.mcp)} — {Math.round(Number(c.composite) * 100)}%
+              </li>
             ))}
           </ul>
         ) : null}
@@ -37,7 +53,7 @@ function StepDetail({ step }: { step: PipelineStepState }) {
     );
   }
 
-  if (step.id === "tee_sandbox") {
+  if (step.id === "x402_price") {
     return (
       <div style={{ marginTop: "0.5rem", fontSize: "0.8rem" }}>
         <span
@@ -45,41 +61,35 @@ function StepDetail({ step }: { step: PipelineStepState }) {
             display: "inline-block",
             padding: "0.25rem 0.5rem",
             borderRadius: "4px",
-            background: "#1a2a1a",
-            border: "1px solid #34d399",
-            color: "#6ee7a8",
+            background: "#2a2410",
+            border: "1px solid #fbbf24",
+            color: "#fde68a",
             fontWeight: 600,
           }}
         >
-          {String(d.badge ?? "Secured via Hardware TEE (Gemma Sandboxed)")}
+          {String(d.priceLabel ?? "x402 price gate")}
         </span>
-        {d.inferenceId ? (
+        {d.paymentRequired ? (
           <p style={{ margin: "0.35rem 0 0", color: "#888" }}>
-            inference <code>{String(d.inferenceId).slice(0, 16)}…</code>
+            USDC on {String(d.network ?? "arc-testnet")}
           </p>
-        ) : (
-          <p style={{ margin: "0.35rem 0 0", color: "#fbbf24" }}>No CAI attestation on record yet</p>
-        )}
+        ) : null}
       </div>
     );
   }
 
-  if (step.id === "execution_engine" && d.paymentRequired) {
-    return (
-      <p style={{ margin: "0.5rem 0 0", color: "#fbbf24", fontSize: "0.8rem" }}>
-        x402 payment gate — {String(d.priceUsdc ?? "?")} USDC on {String(d.network ?? "arc-testnet")}
-      </p>
-    );
-  }
-
-  if (step.id === "blockchain_proof" && typeof d.summary === "string") {
+  if (step.id === "x402_settlement" && typeof d.summary === "string") {
     return (
       <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "#aaa" }}>
         <p style={{ margin: 0 }}>{d.summary}</p>
+        {d.demoRoute ? (
+          <p style={{ margin: "0.25rem 0 0", color: "#6ee7a8" }}>
+            Demo route → <code>{String(d.demoRoute)}</code>
+          </p>
+        ) : null}
         {d.registryAddress ? (
           <p style={{ margin: "0.25rem 0 0" }}>
-            Registry{" "}
-            <code>{String(d.registryAddress).slice(0, 10)}…</code>
+            ERC-8004 registry <code>{String(d.registryAddress).slice(0, 10)}…</code>
           </p>
         ) : null}
       </div>
@@ -167,7 +177,7 @@ export function FlightTracker({ pipeline }: { pipeline: PipelineRunState | null 
 
   return (
     <section style={{ marginTop: "1.5rem" }}>
-      <h3 style={{ margin: "0 0 1rem", fontSize: "1rem", color: "#ccc" }}>Live Flight Tracker</h3>
+      <h3 style={{ margin: "0 0 1rem", fontSize: "1rem", color: "#ccc" }}>Usecase Workflow — Live Flight Tracker</h3>
       <div
         style={{
           display: "flex",

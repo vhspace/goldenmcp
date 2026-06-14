@@ -2,10 +2,11 @@
 
 import type { ParsedIntent } from "@/lib/intent";
 import type {
-  EnsDiscoveryResult,
   ExecutionResult,
+  MarketplaceMcpResult,
   PipelineRunState,
   PipelineStepId,
+  X402PriceResult,
 } from "@/lib/pipeline";
 import {
   applyStepUpdate,
@@ -56,32 +57,25 @@ export async function runDemoPipeline(
     }
   };
 
-  // Step 1 — user prompt (local parse, no network)
-  push(setActiveStep(state, "user_prompt"));
+  // Step 1 — User @Permit trade intent (local parse)
+  push(setActiveStep(state, "user_trade_intent"));
   push(
-    applyStepUpdate(state, "user_prompt", "complete", {
+    applyStepUpdate(state, "user_trade_intent", "complete", {
+      permit: "User @Permit",
       action: intent.action,
       assets: `${intent.assetsFrom} → ${intent.assetsTo}`,
       minReliabilityScore: intent.minReliabilityScore,
       rawPrompt: intent.rawPrompt,
+      summary: `Trade request: ${intent.action} ${intent.assetsFrom} → ${intent.assetsTo}`,
     }),
   );
 
-  let vendor: EnsDiscoveryResult | undefined;
+  let vendor: MarketplaceMcpResult | undefined;
 
   if (
-    !(await runStep("ens_discovery", async () => {
-      const res = await fetchPipelineStep<EnsDiscoveryResult>("ens-discovery", { intent });
+    !(await runStep("marketplace_mcp", async () => {
+      const res = await fetchPipelineStep<MarketplaceMcpResult>("marketplace-mcp", { intent });
       vendor = res.detail!;
-      return { ...(res.detail as unknown as Record<string, unknown>) };
-    }))
-  ) {
-    return state;
-  }
-
-  if (
-    !(await runStep("tee_sandbox", async () => {
-      const res = await fetchPipelineStep("tee-sandbox", { vendor });
       return { ...(res.detail as unknown as Record<string, unknown>) };
     }))
   ) {
@@ -91,19 +85,24 @@ export async function runDemoPipeline(
   let execution: ExecutionResult | undefined;
 
   if (
-    !(await runStep("execution_engine", async () => {
-      const res = await fetchPipelineStep<ExecutionResult>("execute", { intent });
-      execution = res.detail!;
-      return { ...(res.detail as unknown as Record<string, unknown>) };
+    !(await runStep("x402_price", async () => {
+      const res = await fetchPipelineStep<{ price: X402PriceResult; execution: ExecutionResult }>(
+        "x402-price",
+        { intent },
+      );
+      execution = res.detail!.execution;
+      return { ...(res.detail!.price as unknown as Record<string, unknown>) };
     }))
   ) {
     return state;
   }
 
-  await runStep("blockchain_proof", async () => {
-    const res = await fetchPipelineStep("blockchain-proof", { vendor, execution });
-    return { ...(res.detail as unknown as Record<string, unknown>) };
-  });
+  if (vendor && execution) {
+    await runStep("x402_settlement", async () => {
+      const res = await fetchPipelineStep("x402-settlement", { vendor, execution });
+      return { ...(res.detail as unknown as Record<string, unknown>) };
+    });
+  }
 
   return state;
 }

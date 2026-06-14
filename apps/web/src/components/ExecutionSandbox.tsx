@@ -79,7 +79,7 @@ export function ExecutionSandbox() {
         if (!prev) return prev;
         return {
           ...prev,
-          failedStep: "execution_engine",
+          failedStep: "marketplace_mcp",
           steps: prev.steps.map((s) =>
             s.status === "active"
               ? {
@@ -101,8 +101,8 @@ export function ExecutionSandbox() {
       <header style={{ marginBottom: "1.25rem" }}>
         <h2 style={{ margin: 0, fontSize: "1.35rem" }}>Execution Sandbox</h2>
         <p style={{ color: "#aaa", marginTop: "0.35rem", maxWidth: "48rem" }}>
-          Click a pre-baked demo prompt — orchestration parses intent into plain English, then runs the
-          live pipeline with step-by-step flight tracking.
+          User @Permit trade intent → Marketplace MCP (lifi / 1inch) → x402 price gate → USDC settlement on Arc.
+          Click a demo prompt and start the use-case workflow with live flight tracking.
         </p>
       </header>
 

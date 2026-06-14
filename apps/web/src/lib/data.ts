@@ -10,19 +10,35 @@ export type { LeaderboardEntry, VendorProfile };
 
 const REGISTRY_ABI = parseAbi([
   "function nextAgentId() view returns (uint256)",
-  "function getRecord(uint256 agentId) view returns (string name, string mcpEndpoint, string agentUri, string ensName, string lastAttestationId, bytes32 lastTranscriptHash, bool exists)",
-  "function getCapabilityScore(uint256 agentId, string capability) view returns (uint16 dataScoreBps, uint16 pathScoreBps, uint16 tokenScoreBps, uint16 compositeBps, bool failed, string walrusBlobId)",
+  "function getRecord(uint256 agentId) view returns ((string name, string mcpEndpoint, string agentUri, string ensName, string lastAttestationId, bytes32 lastTranscriptHash, bool exists))",
+  "function getCapabilityScore(uint256 agentId, string capability) view returns ((uint16 dataScoreBps, uint16 pathScoreBps, uint16 tokenEfficiencyBps, uint16 compositeBps, bool failed, string walrusBlobId))",
 ]);
 
+function firstEnv(...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+    if (value) return value;
+  }
+  return undefined;
+}
+
 function getClient() {
-  const rpc = process.env.NEXT_PUBLIC_ARC_RPC_URL;
-  if (!rpc) throw new Error("NEXT_PUBLIC_ARC_RPC_URL is not set");
+  const rpc = firstEnv("NEXT_PUBLIC_ARC_RPC_URL", "ARC_RPC_URL", "ARC_TESTNET_RPC_URL");
+  if (!rpc) {
+    throw new Error(
+      "NEXT_PUBLIC_ARC_RPC_URL is not set (also tried ARC_RPC_URL, ARC_TESTNET_RPC_URL)",
+    );
+  }
   return createPublicClient({ transport: http(rpc) });
 }
 
 function getRegistryAddress() {
-  const addr = process.env.NEXT_PUBLIC_REGISTRY_ADDRESS;
-  if (!addr) throw new Error("NEXT_PUBLIC_REGISTRY_ADDRESS is not set");
+  const addr = firstEnv("NEXT_PUBLIC_REGISTRY_ADDRESS", "ARC_REGISTRY_ADDRESS");
+  if (!addr) {
+    throw new Error(
+      "NEXT_PUBLIC_REGISTRY_ADDRESS is not set (also tried ARC_REGISTRY_ADDRESS)",
+    );
+  }
   return addr as `0x${string}`;
 }
 
@@ -44,7 +60,7 @@ export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
       functionName: "getRecord",
       args: [id],
     });
-    if (!rec[6]) continue;
+    if (!rec.exists) continue;
     for (const cap of CAPABILITIES) {
       const score = await client.readContract({
         address: registry,
@@ -52,20 +68,22 @@ export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
         functionName: "getCapabilityScore",
         args: [id, cap],
       });
-      if (!score[5]) continue;
+      if (!score.walrusBlobId) continue;
       entries.push({
-        mcp: rec[0],
+        mcp: rec.name,
         capability: cap,
-        dataScore: Number(score[0]) / 10000,
-        pathScore: Number(score[1]) / 10000,
-        tokenEfficiency: Number(score[2]) / 10000,
-        composite: Number(score[3]) / 10000,
-        failed: score[4],
-        walrusBlobId: score[5],
-        ensName: rec[3],
-        attestationRef: rec[4],
+        dataScore: score.dataScoreBps / 10000,
+        pathScore: score.pathScoreBps / 10000,
+        tokenEfficiency: score.tokenEfficiencyBps / 10000,
+        composite: score.compositeBps / 10000,
+        failed: score.failed,
+        walrusBlobId: score.walrusBlobId,
+        ensName: rec.ensName,
+        attestationRef: rec.lastAttestationId,
         transcriptHash:
-          rec[5] && rec[5] !== `0x${"0".repeat(64)}` ? rec[5] : "",
+          rec.lastTranscriptHash && rec.lastTranscriptHash !== `0x${"0".repeat(64)}`
+            ? rec.lastTranscriptHash
+            : "",
       });
     }
   }
@@ -94,9 +112,11 @@ export async function fetchManifest(mcp: string, capability: string): Promise<Sc
 }
 
 async function fetchWalrusJson(blobId: string): Promise<Record<string, unknown>> {
-  const aggregator = process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR_URL;
+  const aggregator = firstEnv("NEXT_PUBLIC_WALRUS_AGGREGATOR_URL", "WALRUS_AGGREGATOR_URL");
   if (!aggregator) {
-    throw new Error("NEXT_PUBLIC_WALRUS_AGGREGATOR_URL is not set — cannot fetch Walrus manifests");
+    throw new Error(
+      "NEXT_PUBLIC_WALRUS_AGGREGATOR_URL is not set (also tried WALRUS_AGGREGATOR_URL)",
+    );
   }
   const res = await fetch(`${aggregator}/v1/blobs/${blobId}`);
   if (!res.ok) {
@@ -156,8 +176,8 @@ export async function fetchVendorProfiles(): Promise<VendorProfile[]> {
 }
 
 export async function resolveENS(name: string) {
-  const rpc = process.env.NEXT_PUBLIC_ENS_RPC_URL;
-  if (!rpc) throw new Error("NEXT_PUBLIC_ENS_RPC_URL is not set");
+  const rpc = firstEnv("NEXT_PUBLIC_ENS_RPC_URL", "ENS_RPC_URL");
+  if (!rpc) throw new Error("NEXT_PUBLIC_ENS_RPC_URL is not set (also tried ENS_RPC_URL)");
   const { createPublicClient, http, namehash } = await import("viem");
   const { mainnet } = await import("viem/chains");
   const client = createPublicClient({ chain: mainnet, transport: http(rpc) });
