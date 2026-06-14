@@ -59,10 +59,11 @@ The marketplace MCP is x402-gated: lookups return HTTP 402 with a USDC price unt
 
 | What | Code |
 |------|------|
-| x402-gated lookup server (402 challenge, price ladder, settlement) | [`packages/marketplace-mcp/src/goldenmcp_marketplace/app.py`](https://github.com/vhspace/goldenmcp/blob/main/packages/marketplace-mcp/src/goldenmcp_marketplace/app.py) |
+| x402-gated lookup server — 402 challenge, dynamic price ladder, Circle Gateway settlement on Arc (`@circle-fin/x402-batching`, `eip155:5042002`) | [`packages/marketplace-mcp-ts/src/server.ts`](https://github.com/vhspace/goldenmcp/blob/main/packages/marketplace-mcp-ts/src/server.ts) |
+| Price ladder + registry/Walrus score index | [`packages/marketplace-mcp-ts/src/pricing.ts`](https://github.com/vhspace/goldenmcp/blob/main/packages/marketplace-mcp-ts/src/pricing.ts), [`registry.ts`](https://github.com/vhspace/goldenmcp/blob/main/packages/marketplace-mcp-ts/src/registry.ts) |
+| x402 buyer agent demo (pays USDC on Arc, retries with `X-PAYMENT`) | [`packages/marketplace-mcp-ts/demo/lookup_agent.ts`](https://github.com/vhspace/goldenmcp/blob/main/packages/marketplace-mcp-ts/demo/lookup_agent.ts) |
 | MCP registry contract (`register`, `updateCapabilityScore`, `recordAttestation`) | [`contracts/mcp-registry/src/MCPRegistry.sol`](https://github.com/vhspace/goldenmcp/blob/main/contracts/mcp-registry/src/MCPRegistry.sol) |
 | Arc deploy script | [`contracts/mcp-registry/script/Deploy.s.sol`](https://github.com/vhspace/goldenmcp/blob/main/contracts/mcp-registry/script/Deploy.s.sol) |
-| x402 nanopayments seller + buyer (Circle Gateway, Arc) | [`packages/marketplace-mcp-ts/`](https://github.com/vhspace/goldenmcp/blob/main/packages/marketplace-mcp-ts/) |
 | CRE → Arc registry write (`writeToArc`) | [`workflows/eval-pipeline/src/pipeline.ts`](https://github.com/vhspace/goldenmcp/blob/main/workflows/eval-pipeline/src/pipeline.ts) |
 
 ### Walrus — decentralized eval-blob storage (supporting integration)
@@ -210,7 +211,8 @@ See [docs/scoring.md](docs/scoring.md).
 ```
 packages/inspect-web3     Inspect tasks + scorers
 packages/walrus-client    walrus:// fsspec + HTTP client
-packages/marketplace-mcp  x402 MCP server
+packages/marketplace-mcp-ts  x402 MCP server (Arc, Circle Gateway) — current
+packages/marketplace-mcp     legacy Python x402 server (superseded by -ts)
 packages/identity         ENS + registry SDK
 packages/eval-runner      HTTP service for CRE
 apps/web                  Leaderboard, eval viewer, ENS resolver
