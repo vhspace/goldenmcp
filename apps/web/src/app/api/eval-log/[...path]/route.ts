@@ -6,14 +6,30 @@ export const dynamic = "force-dynamic";
 /**
  * Stream the raw Inspect `.eval` log (a ZIP archive) for an MCP/capability.
  *
- * The Inspect bundled viewer picks its parser by file extension — it only treats
- * the bytes as a ZIP when the URL ends in `.eval`, else it JSON-parses (and chokes
- * on the ZIP's `PK` magic). So the path must end in `.eval`, not a query string:
- *
  *   GET /api/eval-log/<mcp>/<capability>.eval
+ *
+ * Two viewer requirements drive this route:
+ *  - The viewer picks ZIP vs JSON parsing by URL extension, so the path ends in
+ *    `.eval` (not a query string).
+ *  - The viewer reads the ZIP via HTTP Range requests: it fetches Content-Length,
+ *    then requests byte ranges for the end-of-central-directory + entries. So we
+ *    must advertise Content-Length + Accept-Ranges and honor Range with a 206.
+ *
+ * Walrus blobs aren't range-addressable here, so we buffer the whole `.eval`
+ * (they are small — tens of KB) and slice locally.
  */
+function baseHeaders(mcp: string, capability: string, length: number): HeadersInit {
+  return {
+    "Content-Type": "application/zip",
+    "Content-Disposition": `inline; filename="${mcp}_${capability}.eval"`,
+    "Accept-Ranges": "bytes",
+    "Cache-Control": "public, max-age=300",
+    "Content-Length": String(length),
+  };
+}
+
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ path: string[] }> },
 ) {
   const { path } = await context.params;
@@ -38,15 +54,42 @@ export async function GET(
         { status: 502 },
       );
     }
-    const body = await upstream.arrayBuffer();
-    return new NextResponse(body, {
+    const full = new Uint8Array(await upstream.arrayBuffer());
+    const total = full.byteLength;
+
+    // Honor a single byte range (the viewer's ZIP reader uses `bytes=start-end`).
+    const range = request.headers.get("range");
+    const match = range && /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+    if (match) {
+      const startRaw = match[1];
+      const endRaw = match[2];
+      let start = startRaw ? Number(startRaw) : 0;
+      let end = endRaw ? Number(endRaw) : total - 1;
+      if (!startRaw && endRaw) {
+        // suffix range: last N bytes
+        start = Math.max(0, total - Number(endRaw));
+        end = total - 1;
+      }
+      if (Number.isNaN(start) || Number.isNaN(end) || start > end || start >= total) {
+        return new NextResponse(null, {
+          status: 416,
+          headers: { "Content-Range": `bytes */${total}`, "Accept-Ranges": "bytes" },
+        });
+      }
+      end = Math.min(end, total - 1);
+      const slice = full.subarray(start, end + 1);
+      return new NextResponse(slice, {
+        status: 206,
+        headers: {
+          ...baseHeaders(mcp, capability, slice.byteLength),
+          "Content-Range": `bytes ${start}-${end}/${total}`,
+        },
+      });
+    }
+
+    return new NextResponse(full, {
       status: 200,
-      headers: {
-        // .eval files are ZIP archives (inspect-ai >= 0.3).
-        "Content-Type": "application/zip",
-        "Content-Disposition": `inline; filename="${mcp}_${capability}.eval"`,
-        "Cache-Control": "public, max-age=300",
-      },
+      headers: baseHeaders(mcp, capability, total),
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
