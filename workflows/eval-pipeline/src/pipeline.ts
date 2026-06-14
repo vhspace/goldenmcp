@@ -3,9 +3,7 @@ import {
   EVMClient,
   HTTPClient,
   type HTTPSendRequester,
-  ok,
   prepareReportRequest,
-  text,
   TxStatus,
   type Runtime,
 } from "@chainlink/cre-sdk";
@@ -219,7 +217,10 @@ export function creHttp(runtime: Runtime<Config>, req: CreHttpRequest): CreHttpR
             ...(req.timeout ? { timeout: req.timeout } : {}),
           })
           .result();
-        return { statusCode: resp.statusCode, bodyText: text(resp) };
+        return {
+          statusCode: resp.statusCode,
+          bodyText: resp.body ? new TextDecoder().decode(resp.body) : "",
+        };
       },
       consensusIdenticalAggregation<CreHttpResult>(),
     )()
@@ -381,12 +382,12 @@ export function pollEvalRunUntilPublished(
   finalizeEvalRunPollStatus(lastStatus, "published");
 }
 
-export async function runEvalScore(
+export function runEvalScore(
   runtime: Runtime<Config>,
   target: PipelineTarget,
   apiKey: string,
   model?: string,
-): Promise<{ run_id: string; manifest: ScoreManifest }> {
+): { run_id: string; manifest: ScoreManifest } {
   const config = runtime.config;
   const base = config.evalRunnerUrl.replace(/\/$/, "");
 
@@ -511,7 +512,8 @@ export function submitCaiInference(
     timeout: CRE_HTTP_TIMEOUT,
   });
 
-  const submitText = requireHttpOk(submitResponse, "CAI /v1/inference submit");
+  // CAI returns 202 Accepted (queued) on submit, sometimes 200.
+  const submitText = requireHttpOk(submitResponse, "CAI /v1/inference submit", [200, 202]);
   const submitParsed = JSON.parse(submitText) as { id: string; status?: string };
   const inferenceId = submitParsed.id;
   if (!inferenceId) {
@@ -521,11 +523,11 @@ export function submitCaiInference(
   return inferenceId;
 }
 
-export async function caiAttest(
+export function caiAttest(
   runtime: Runtime<Config>,
   manifest: ScoreManifest,
   caiApiKey: string,
-): Promise<CaiAttestation> {
+): CaiAttestation {
   const config = runtime.config;
   const base = config.chainlinkCaiUrl.replace(/\/$/, "");
   const model = CAI_MODEL;
@@ -568,17 +570,17 @@ export async function caiAttest(
   finalizeCaiPollStatus(lastStatus);
 }
 
-export async function publishToWalrus(
+export function publishToWalrus(
   runtime: Runtime<Config>,
   runId: string,
   apiKey: string,
   attestation?: CaiAttestation,
-): Promise<{
+): {
   manifest: ScoreManifest;
   walrus_manifest_blob_id: string;
   walrus_eval_blob_id: string;
   walrus_index_blob_id?: string;
-}> {
+} {
   const base = runtime.config.evalRunnerUrl.replace(/\/$/, "");
   const body = JSON.stringify({
     run_id: runId,
@@ -793,11 +795,11 @@ function resolveArcClient(
  * Depends on NOTHING from Walrus, so handler B calls this first — the attestation
  * lands on-chain without waiting on the Walrus upload.
  */
-export async function writeAttestationToArc(
+export function writeAttestationToArc(
   runtime: Runtime<Config>,
   agentId: number,
   attestation: CaiAttestation,
-): Promise<{ attestationRecordTxHash?: string }> {
+): { attestationRecordTxHash?: string } {
   const arc = resolveArcClient(runtime);
   if (!arc || !attestation.inference_id?.trim()) return {};
 
@@ -820,13 +822,13 @@ export async function writeAttestationToArc(
 }
 
 /** Write the capability score + Walrus blob pointer to Arc (updateCapabilityScore). */
-export async function writeScoreToArc(
+export function writeScoreToArc(
   runtime: Runtime<Config>,
   agentId: number,
   capability: string,
   manifest: ScoreManifest,
   walrusBlobId: string,
-): Promise<{ scoreTxHash?: string }> {
+): { scoreTxHash?: string } {
   const arc = resolveArcClient(runtime);
   if (!arc) return {};
 
@@ -861,31 +863,31 @@ export async function writeScoreToArc(
 }
 
 /** Combined score + attestation write (inline runPipeline fallback path). */
-export async function writeToArc(
+export function writeToArc(
   runtime: Runtime<Config>,
   agentId: number,
   capability: string,
   manifest: ScoreManifest,
   walrusBlobId: string,
   attestation?: CaiAttestation,
-): Promise<{ scoreTxHash?: string; attestationRecordTxHash?: string }> {
-  const { scoreTxHash } = await writeScoreToArc(runtime, agentId, capability, manifest, walrusBlobId);
+): { scoreTxHash?: string; attestationRecordTxHash?: string } {
+  const { scoreTxHash } = writeScoreToArc(runtime, agentId, capability, manifest, walrusBlobId);
   const { attestationRecordTxHash } = attestation
-    ? await writeAttestationToArc(runtime, agentId, attestation)
+    ? writeAttestationToArc(runtime, agentId, attestation)
     : {};
   return { scoreTxHash, attestationRecordTxHash };
 }
 
-export async function runPipeline(
+export function runPipeline(
   runtime: Runtime<Config>,
   target: PipelineTarget,
-): Promise<PipelineResult> {
+): PipelineResult {
   const config = runtime.config;
   const agentId = target.agentId ?? config.defaultAgentId;
   runtime.log(`runPipeline start mcp=${target.mcp} capability=${target.capability} agentId=${agentId}`);
 
   const evalRunnerApiKey = getEvalRunnerApiKey(runtime);
-  const scored = await runEvalScore(runtime, target, evalRunnerApiKey);
+  const scored = runEvalScore(runtime, target, evalRunnerApiKey);
 
   const caiApiKey = getCaiApiKey(runtime);
   let attestation: CaiAttestation | undefined;
@@ -907,10 +909,10 @@ export async function runPipeline(
         "chainlinkCaiUrl config required when CHAINLINK_CAI_API_KEY is set — refusing silent CAI skip",
       );
     }
-    attestation = await caiAttest(runtime, scored.manifest, caiApiKey);
+    attestation = caiAttest(runtime, scored.manifest, caiApiKey);
   }
 
-  const published = await publishToWalrus(
+  const published = publishToWalrus(
     runtime,
     scored.run_id,
     evalRunnerApiKey,
@@ -926,7 +928,7 @@ export async function runPipeline(
     skippedArc = true;
     runtime.log("arcRegistryAddress empty — skipping Arc registry write after Walrus publish");
   } else {
-    const arcResult = await writeToArc(
+    const arcResult = writeToArc(
       runtime,
       agentId,
       target.capability,
