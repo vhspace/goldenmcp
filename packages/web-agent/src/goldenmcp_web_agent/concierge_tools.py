@@ -248,10 +248,33 @@ def anthropic_tool_definitions() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "lifi_quote_eth_to_usdc",
+            "description": (
+                "Quote ETH→USDC on Base via LI.FI get-quote using canonical eval addresses. "
+                "Prefer this over raw call_vendor_mcp_tool for ETH/USDC quotes."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "amount_eth": {
+                        "type": "number",
+                        "description": "ETH amount to quote, e.g. 0.001",
+                    },
+                    "chain_id": {
+                        "type": "integer",
+                        "description": "EVM chain id (default 8453 Base)",
+                    },
+                },
+                "required": ["amount_eth"],
+            },
+        },
+        {
             "name": "call_vendor_mcp_tool",
             "description": (
-                "Call a read-only tool on a vendor MCP. Example: lifi get-chains, "
-                "odos ODOS_GET_CHAIN_ID with chain Base, jupiter jupiter_get_price."
+                "Call a read-only vendor MCP tool. For LI.FI get-quote on Base you MUST pass "
+                "fromChain/toChain (8453), full 0x fromToken/toToken addresses, fromAmount as "
+                "wei string, and fromAddress. Prefer lifi_quote_eth_to_usdc for ETH→USDC. "
+                "Never call get-tokens (response is huge); use get-token for one symbol."
             ),
             "input_schema": {
                 "type": "object",
@@ -313,6 +336,24 @@ async def execute_tool(name: str, tool_input: dict[str, Any]) -> str:
 
         tools = await list_vendor_tools(tool_input["vendor"])
         return json.dumps({"vendor": tool_input["vendor"], "tools": tools})
+    if name == "lifi_quote_eth_to_usdc":
+        from goldenmcp_web_agent.lifi_quote import build_lifi_eth_to_usdc_quote_args
+        from goldenmcp_web_agent.vendor_mcp import call_vendor_tool
+
+        amount = float(tool_input["amount_eth"])
+        chain_id = int(tool_input.get("chain_id", 8453))
+        args = build_lifi_eth_to_usdc_quote_args(amount, chain_id=chain_id)
+        out = await call_vendor_tool("lifi", "get-quote", args)
+        return json.dumps(
+            {
+                "vendor": "lifi",
+                "tool_name": "get-quote",
+                "amount_eth": amount,
+                "chain_id": chain_id,
+                "arguments": args,
+                "result": out,
+            }
+        )
     if name == "call_vendor_mcp_tool":
         from goldenmcp_web_agent.vendor_mcp import call_vendor_tool
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { ChatMarkdown } from "@/components/ChatMarkdown";
 import { DEMO_PROMPTS } from "@/lib/intent";
 import { parseSseChunk, type SseEvent } from "@/lib/chat-sse";
 
@@ -232,9 +233,11 @@ export function ChatConcierge() {
             >
               {m.role}
             </div>
-            <div style={{ color: m.role === "user" ? "#e6e6e6" : "#b8c0cc", whiteSpace: "pre-wrap" }}>
-              {m.content}
-            </div>
+            {m.role === "assistant" ? (
+              <ChatMarkdown content={m.content} />
+            ) : (
+              <div style={{ color: "#e6e6e6", whiteSpace: "pre-wrap" }}>{m.content}</div>
+            )}
             {m.toolEvents && m.toolEvents.length > 0 && <ToolResultCard events={m.toolEvents} />}
           </div>
         ))}
