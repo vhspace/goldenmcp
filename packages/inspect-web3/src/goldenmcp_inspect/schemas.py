@@ -85,6 +85,9 @@ class ScoreManifest(BaseModel):
     composite: float = 0.0
     walrus_blob_id: str | None = None
     walrus_manifest_blob_id: str | None = None
+    # Walrus index blob that resolves walrus_blob_id's indexed path to a concrete
+    # blob. Embedded so each manifest is self-resolving (frontend needs no env var).
+    walrus_index_blob_id: str | None = None
     # CAI inference id, mirrored onchain via recordAttestation as the reference.
     attestation_id: str | None = None
     attestation: CaiAttestation | None = None

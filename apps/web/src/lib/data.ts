@@ -99,6 +99,7 @@ export interface ScoreManifest {
   composite?: number;
   walrus_blob_id?: string | null;
   walrus_manifest_blob_id?: string | null;
+  walrus_index_blob_id?: string | null;
   attestation?: Record<string, unknown> | null;
   attestation_id?: string | null;
   [key: string]: unknown;
@@ -138,9 +139,11 @@ async function fetchWalrusJson(blobId: string): Promise<Record<string, unknown>>
  *   2. an indexed logical path `walrus://evals/goldenmcp/..._run.eval` that
  *      must be resolved through the WalrusFileSystem index blob.
  *
- * For case (2) we load the index JSON (its blob id comes from WALRUS_INDEX_BLOB_ID)
- * and map the logical path -> concrete blob id. Returns the aggregator HTTP URL
- * for the raw `.eval` bytes, or throws with an actionable message.
+ * For case (2) we resolve the logical path through the WalrusFileSystem index.
+ * The index blob id comes from the manifest's own `walrus_index_blob_id` (each
+ * manifest self-resolves its eval path), falling back to the WALRUS_INDEX_BLOB_ID
+ * env var for older manifests that predate that field. Returns the aggregator HTTP
+ * URL for the raw `.eval` bytes, or throws with an actionable message.
  */
 export async function resolveEvalLogUrl(manifest: ScoreManifest): Promise<string> {
   const ref = manifest.walrus_blob_id;
@@ -155,11 +158,14 @@ export async function resolveEvalLogUrl(manifest: ScoreManifest): Promise<string
   }
 
   // Case 2: walrus:// indexed logical path -> resolve via the index blob.
-  const indexBlobId = firstEnv("WALRUS_INDEX_BLOB_ID", "NEXT_PUBLIC_WALRUS_INDEX_BLOB_ID");
+  // Prefer the manifest-embedded index id; fall back to env for legacy manifests.
+  const indexBlobId =
+    (typeof manifest.walrus_index_blob_id === "string" && manifest.walrus_index_blob_id.trim()) ||
+    firstEnv("WALRUS_INDEX_BLOB_ID", "NEXT_PUBLIC_WALRUS_INDEX_BLOB_ID");
   if (!indexBlobId) {
     throw new Error(
-      `eval log is at indexed path "${ref}" but WALRUS_INDEX_BLOB_ID is not set — ` +
-        "set the Walrus index blob id (printed by post_eval_walrus as walrus_index_blob_id) to resolve it",
+      `eval log is at indexed path "${ref}" but no index blob id available — ` +
+        "manifest has no walrus_index_blob_id and WALRUS_INDEX_BLOB_ID is unset",
     );
   }
   const logical = ref.replace(/^walrus:\/\//, "").replace(/^\/+/, "").replace(/\/+$/, "");
@@ -211,12 +217,15 @@ export async function fetchVendorProfiles(): Promise<VendorProfile[]> {
           profile.latencyError = "manifest has no walrus_blob_id for eval log";
           return;
         }
-        if (evalRef.startsWith("walrus://")) {
-          profile.latencyError =
-            "eval log stored at walrus:// indexed path — open Inspect View for full timing";
+        // Resolve direct or walrus:// indexed paths (via the manifest's embedded
+        // index blob) to a concrete aggregator URL, then read timing stats.
+        const evalLogUrl = await resolveEvalLogUrl(manifest);
+        const res = await fetch(evalLogUrl);
+        if (!res.ok) {
+          profile.latencyError = `eval log fetch failed: HTTP ${res.status}`;
           return;
         }
-        const evalLog = await fetchWalrusJson(evalRef);
+        const evalLog = (await res.json()) as Record<string, unknown>;
         profile.latencyMs = extractLatencyMsFromEvalLog(evalLog);
         if (profile.latencyMs === null) {
           profile.latencyError = "eval log has no timing stats (stats.total_time missing)";
