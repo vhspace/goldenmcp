@@ -22,9 +22,12 @@ from goldenmcp_inspect.mcp_connectors import (
     odos_stdio_config,
 )
 
+from goldenmcp_web_agent.lifi_quote import normalize_lifi_get_quote_args
+
 logger = logging.getLogger(__name__)
 
 BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+MAX_TOOL_RESULT_CHARS = 12_000
 
 VENDOR_NAMES = ("lifi", "1inch", "odos", "jupiter", "kyberswap")
 
@@ -115,6 +118,25 @@ async def vendor_mcp_session(vendor: str) -> AsyncIterator[ClientSession]:
             yield session
 
 
+def _unwrap_exception(exc: BaseException) -> BaseException:
+    """Flatten asyncio ExceptionGroup / TaskGroup wrappers from MCP HTTP teardown."""
+    if isinstance(exc, BaseExceptionGroup) and exc.exceptions:
+        return _unwrap_exception(exc.exceptions[0])
+    return exc
+
+
+def _prepare_vendor_tool_args(vendor: str, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    if vendor == "lifi" and tool_name == "get-quote":
+        return normalize_lifi_get_quote_args(arguments)
+    return arguments
+
+
+def _truncate_text(text: str, limit: int = MAX_TOOL_RESULT_CHARS) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
+
 async def list_vendor_tools(vendor: str) -> list[str]:
     async with vendor_mcp_session(vendor) as session:
         listed = await session.list_tools()
@@ -122,21 +144,31 @@ async def list_vendor_tools(vendor: str) -> list[str]:
 
 
 async def call_vendor_tool(vendor: str, tool_name: str, arguments: dict[str, Any]) -> str:
-    async with vendor_mcp_session(vendor) as session:
-        result = await session.call_tool(tool_name, arguments)
-        if getattr(result, "isError", False):
-            preview = _content_preview(result.content, limit=500)
-            raise RuntimeError(f"{vendor} tool {tool_name} failed: {preview}")
-        parts = []
-        for block in result.content:
-            text = getattr(block, "text", None)
-            if text is not None:
-                parts.append(str(text))
+    arguments = _prepare_vendor_tool_args(vendor, tool_name, arguments)
+    err: BaseException | None = None
+    out: str | None = None
+    try:
+        async with vendor_mcp_session(vendor) as session:
+            result = await session.call_tool(tool_name, arguments)
+            if getattr(result, "isError", False):
+                preview = _content_preview(result.content, limit=500)
+                err = RuntimeError(f"{vendor} tool {tool_name} failed: {preview}")
             else:
-                parts.append(str(block))
-        if not parts:
-            raise RuntimeError(f"{vendor} tool {tool_name} returned empty content")
-        return "\n".join(parts)
+                parts = []
+                for block in result.content:
+                    text = getattr(block, "text", None)
+                    parts.append(str(text) if text is not None else str(block))
+                if not parts:
+                    err = RuntimeError(f"{vendor} tool {tool_name} returned empty content")
+                else:
+                    out = _truncate_text("\n".join(parts))
+    except BaseException as exc:
+        err = _unwrap_exception(exc)
+
+    if err is not None:
+        raise err
+    assert out is not None
+    return out
 
 
 async def probe_vendor(vendor: str, *, run_call: bool = True) -> VendorProbeResult:
@@ -192,14 +224,15 @@ async def probe_vendor(vendor: str, *, run_call: bool = True) -> VendorProbeResu
                 probe_tool=probe_tool,
                 probe_preview=preview,
             )
-    except Exception as exc:
+    except BaseException as exc:
         logger.exception("vendor probe failed vendor=%s", vendor)
+        unwrapped = _unwrap_exception(exc)
         return VendorProbeResult(
             vendor=vendor,
             ok=False,
             tool_count=0,
             tools=[],
-            error=str(exc),
+            error=str(unwrapped),
         )
 
 

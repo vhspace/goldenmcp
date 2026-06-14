@@ -48,6 +48,15 @@ def _normalize_history(history: list[dict[str, str]] | None) -> list[dict[str, A
     return out
 
 
+MAX_TOOL_RESULT_CHARS = 12_000
+
+
+def _truncate_tool_result(result: str) -> str:
+    if len(result) <= MAX_TOOL_RESULT_CHARS:
+        return result
+    return result[: MAX_TOOL_RESULT_CHARS - 3] + "..."
+
+
 async def stream_chat(
     message: str,
     history: list[dict[str, str]] | None = None,
@@ -130,6 +139,7 @@ async def stream_chat(
                 is_error = True
                 yield {"event": "error", "data": {"tool": tu["name"], "message": str(exc)}}
 
+            result = _truncate_tool_result(result)
             yield {
                 "event": "tool_end",
                 "data": {
