@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { SponsorTracksSection } from "@/components/landing/SponsorTracksSection";
 import { HackathonVendorsSection } from "@/components/landing/HackathonVendorsSection";
-import { KeyComponentsSection } from "@/components/landing/KeyComponentsSection";
 import { WhyGoldenMcpSection } from "@/components/landing/WhyGoldenMcpSection";
 import {
   LANDING_CTA,
@@ -56,16 +55,6 @@ export function LandingPage() {
       </section>
 
       <div className={styles.sections}>
-        <section id="about">
-          <h2 className={styles.sectionTitle}>About GoldenMCP</h2>
-          <p className={styles.sectionLead}>
-            A hackathon-grade evaluation marketplace for Web3 MCP servers — judges and agents discover
-            vendors by live Golden Score, ENS identity, and x402-gated lookup on Arc.
-          </p>
-        </section>
-
-        <KeyComponentsSection />
-
         <WhyGoldenMcpSection />
 
         <SponsorTracksSection />

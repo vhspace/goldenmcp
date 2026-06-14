@@ -3,7 +3,6 @@ import {
   LANDING_CTA,
   LANDING_FEATURES,
   LANDING_HERO,
-  LANDING_KEY_COMPONENTS,
   LANDING_NAV,
   LANDING_SPONSOR_TRACKS,
   LANDING_VENDORS,
@@ -31,28 +30,6 @@ describe("landing content (GH #108)", () => {
   test("features highlight real GoldenMCP pillars", () => {
     const text = LANDING_FEATURES.map((f) => `${f.title} ${f.body}`).join(" ");
     expect(text).toMatch(/Inspect|ENS|Walrus|x402|Arc|CAI|TEE/i);
-  });
-});
-
-describe("landing key components (GH #124)", () => {
-  test("section has hero and three pillar cards", () => {
-    expect(LANDING_KEY_COMPONENTS.sectionTitle.length).toBeGreaterThan(5);
-    expect(LANDING_KEY_COMPONENTS.hero.subPanels.length).toBe(2);
-    expect(LANDING_KEY_COMPONENTS.cards.length).toBe(3);
-  });
-
-  test("copy references real GoldenMCP stack", () => {
-    const text = [
-      LANDING_KEY_COMPONENTS.hero.title,
-      LANDING_KEY_COMPONENTS.hero.body,
-      ...LANDING_KEY_COMPONENTS.hero.subPanels.map((p) => `${p.title} ${p.body}`),
-      ...LANDING_KEY_COMPONENTS.cards.map((c) => `${c.title} ${c.body}`),
-    ].join(" ");
-    expect(text).toMatch(/Walrus|Arc|Inspect|Chainlink|CAI|x402|USDC|ENS/i);
-  });
-
-  test("nav includes components anchor", () => {
-    expect(LANDING_NAV.some((l) => l.href === "#components")).toBe(true);
   });
 });
 
