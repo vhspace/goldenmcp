@@ -29,7 +29,7 @@ ENS is the identity and discovery layer for every scored MCP. Each MCP is a `chi
 
 **Submitting for:** Best workflow with CRE + Best usage of Confidential AI Attester.
 
-A Chainlink CRE workflow orchestrates the whole pipeline: it calls the eval-runner to score an MCP, submits the score manifest to Confidential AI (CAI) for attestation, publishes to Walrus, then **writes the score + attestation onchain** via `updateCapabilityScore` + `recordAttestation` on the Arc registry. The CRE workflow drives a real onchain state change — it is the orchestration layer, not a frontend read.
+A Chainlink CRE workflow orchestrates the pipeline as **two event-driven handlers**. A hook (repo update, API change, or manual fire) hits the workflow's HTTP **run** trigger: it scores an MCP via the eval-runner and submits the score manifest to Confidential AI (CAI) with a `cre_callback` back to the workflow. When CAI finishes, its callback starts a **fresh execution** that publishes to Walrus and **writes the score + attestation onchain** via `updateCapabilityScore` + `recordAttestation` on the Arc registry. The CRE workflow drives a real onchain state change — it is the orchestration layer, not a frontend read. (See the [eval-pipeline diagram](#eval-pipeline-chainlink-cre) for the full two-handler flow.)
 
 The attestation **is** the completed TEE inference — there is no synthetic tx hash. CAI processes the eval manifest (sensitive scoring data) inside the enclave; the pipeline records the CAI `inference_id` and the `bytes32` **transcript hash** (the enclave's `response_digest`, falling back to `sha256(output)`) onchain via `recordAttestation`, mirroring Chainlink's official undercollateralized-loan example.
 
@@ -37,9 +37,9 @@ The CRE workflow's onchain target is the same Arc registry — [`recordAttestati
 
 | What | Code |
 |------|------|
-| CRE pipeline (eval → CAI attest → Walrus → Arc) | [`workflows/eval-pipeline/src/pipeline.ts`](https://github.com/vhspace/goldenmcp/blob/main/workflows/eval-pipeline/src/pipeline.ts) |
-| CRE workflow entrypoint + cron trigger | [`workflows/eval-pipeline/src/workflow.ts`](https://github.com/vhspace/goldenmcp/blob/main/workflows/eval-pipeline/src/workflow.ts) |
-| CAI submit/poll + attestation parsing (`caiAttest`, `parseCaiAttestation`) | [`workflows/eval-pipeline/src/pipeline.ts`](https://github.com/vhspace/goldenmcp/blob/main/workflows/eval-pipeline/src/pipeline.ts) |
+| CRE pipeline steps (eval → CAI attest → Walrus → Arc) | [`workflows/eval-pipeline/src/pipeline.ts`](https://github.com/vhspace/goldenmcp/blob/main/workflows/eval-pipeline/src/pipeline.ts) |
+| Workflow triggers + two handlers (HTTP run / CAI callback / cron) | [`workflows/eval-pipeline/src/workflow.ts`](https://github.com/vhspace/goldenmcp/blob/main/workflows/eval-pipeline/src/workflow.ts) |
+| CAI submit + callback parsing (`submitCaiInference`, `caiAttest`, `parseCaiAttestation`) | [`workflows/eval-pipeline/src/pipeline.ts`](https://github.com/vhspace/goldenmcp/blob/main/workflows/eval-pipeline/src/pipeline.ts) |
 | eval-runner HTTP service CRE calls | [`packages/eval-runner/`](https://github.com/vhspace/goldenmcp/tree/main/packages/eval-runner) |
 | CRE workflow config | [`workflows/eval-pipeline/workflow.yaml`](https://github.com/vhspace/goldenmcp/blob/main/workflows/eval-pipeline/workflow.yaml) |
 
@@ -59,10 +59,11 @@ The marketplace MCP is x402-gated: lookups return HTTP 402 with a USDC price unt
 
 | What | Code |
 |------|------|
-| x402-gated lookup server (402 challenge, price ladder, settlement) | [`packages/marketplace-mcp/src/goldenmcp_marketplace/app.py`](https://github.com/vhspace/goldenmcp/blob/main/packages/marketplace-mcp/src/goldenmcp_marketplace/app.py) |
+| x402-gated lookup server — 402 challenge, dynamic price ladder, Circle Gateway settlement on Arc (`@circle-fin/x402-batching`, `eip155:5042002`) | [`packages/marketplace-mcp-ts/src/server.ts`](https://github.com/vhspace/goldenmcp/blob/main/packages/marketplace-mcp-ts/src/server.ts) |
+| Price ladder + registry/Walrus score index | [`packages/marketplace-mcp-ts/src/pricing.ts`](https://github.com/vhspace/goldenmcp/blob/main/packages/marketplace-mcp-ts/src/pricing.ts), [`registry.ts`](https://github.com/vhspace/goldenmcp/blob/main/packages/marketplace-mcp-ts/src/registry.ts) |
+| x402 buyer agent demo (pays USDC on Arc, retries with `X-PAYMENT`) | [`packages/marketplace-mcp-ts/demo/lookup_agent.ts`](https://github.com/vhspace/goldenmcp/blob/main/packages/marketplace-mcp-ts/demo/lookup_agent.ts) |
 | MCP registry contract (`register`, `updateCapabilityScore`, `recordAttestation`) | [`contracts/mcp-registry/src/MCPRegistry.sol`](https://github.com/vhspace/goldenmcp/blob/main/contracts/mcp-registry/src/MCPRegistry.sol) |
 | Arc deploy script | [`contracts/mcp-registry/script/Deploy.s.sol`](https://github.com/vhspace/goldenmcp/blob/main/contracts/mcp-registry/script/Deploy.s.sol) |
-| x402 nanopayments seller + buyer (Circle Gateway, Arc) | [`packages/marketplace-mcp-ts/`](https://github.com/vhspace/goldenmcp/blob/main/packages/marketplace-mcp-ts/) |
 | CRE → Arc registry write (`writeToArc`) | [`workflows/eval-pipeline/src/pipeline.ts`](https://github.com/vhspace/goldenmcp/blob/main/workflows/eval-pipeline/src/pipeline.ts) |
 
 ### Walrus — decentralized eval-blob storage (supporting integration)
@@ -79,27 +80,41 @@ Eval results need durable, verifiable, content-addressed storage that any agent 
 
 ### Eval pipeline (Chainlink CRE)
 
-A CRE cron trigger fetches the benchmark list, then runs each MCP/capability through scoring, attestation, storage, and the onchain write. The eval-runner calls are async: the pipeline kicks off a run and polls until it reaches `scored` / `published`. CAI and Arc steps are skipped when their credentials are absent, so the pipeline is simulatable without secrets.
+The CRE workflow is **event-driven and runs in two async handlers**, so any hook can kick it off — a GitHub repo update, an API-change webhook, or a manual fire. The workflow registers three triggers: an HTTP **"run"** trigger (the one a hook calls), an HTTP **CAI-callback** trigger, and a cron trigger (kept for production; it currently hangs in `cre simulate`, so the demo drives the HTTP run trigger instead). All three execute the same core logic.
+
+**Handler A (run trigger)** asks the eval-runner for the next benchmark (round-robin, one per fire), scores that MCP/capability, then submits the score manifest to Confidential AI with a `cre_callback` pointing back at this workflow — and *returns*. It does not block or poll.
+
+**Handler B (CAI-callback trigger)** is a **fresh execution** started when CAI POSTs its completed inference back. It parses the attestation (`inference_id` + transcript hash), resolves the run via the `inference_id`, publishes the manifest + raw `.eval` log to Walrus, then writes both `recordAttestation` and `updateCapabilityScore` to the Arc registry.
+
+When CAI / the callback URL are not configured, Handler A falls back to the original inline path (`runPipeline`: score → poll → publish → write) so the pipeline stays simulatable without secrets.
 
 ```mermaid
 flowchart TD
-    Cron([CRE cron trigger]) -->|GET /benchmarks| Runner[eval-runner HTTP]
-    Runner -->|benchmark list| Loop[runPipeline per benchmark]
+    Hook([Hook: repo update / API change / manual]) -->|POST run trigger| HA
+    Cron([CRE cron trigger<br/>prod only — hangs in simulate]) -.->|same logic| HA
 
-    Loop -->|"POST /eval/inspect, then poll GET /eval/runs/:id until scored"| Score[score manifest]
-    Runner -.->|runs Inspect eval| MCP[(Web3 MCP server)]
+    subgraph HandlerA [Handler A — run trigger]
+      HA[onRunTrigger] -->|GET /benchmarks/next| Next[next benchmark]
+      Next -->|"POST /eval/inspect, poll until scored"| Score[score manifest]
+      Score -->|"POST CAI /v1/inference<br/>cre_callback = this workflow"| Submit[submit + return]
+    end
+    Runner[(eval-runner HTTP)] -.->|runs Inspect eval| MCP[(Web3 MCP server)]
 
-    Score --> HasCAI{CAI configured?}
-    HasCAI -->|yes| CAI[Confidential AI TEE<br/>POST /v1/inference + poll/callback]
-    HasCAI -->|no| Pub
-    CAI -->|inference_id + transcript_hash| Pub
+    Submit -.->|TEE inference| CAI[Confidential AI TEE]
+    CAI -->|"POST completed status (callback)"| HB
 
-    Pub["POST /eval/publish, then poll until published"] --> Walrus[(Walrus: manifest + raw .eval log)]
-    Walrus --> HasReg{registry set?}
-    HasReg -->|yes| Arc[writeToArc<br/>updateCapabilityScore + recordAttestation]
-    HasReg -->|no| Done([done])
-    Arc --> Registry[(MCPRegistry on Arc)]
+    subgraph HandlerB [Handler B — CAI callback, fresh execution]
+      HB[onAttestationCallback] -->|inference_id + transcript_hash| Resolve[resolve run by inference_id]
+      Resolve -->|POST /eval/publish| Walrus[(Walrus: manifest + raw .eval log)]
+      Walrus --> ArcAtt[recordAttestation]
+      ArcAtt --> ArcScore[updateCapabilityScore + Walrus blob ptr]
+    end
+
+    ArcScore --> Registry[(MCPRegistry on Arc)]
     Registry --> ENS[ENS records point at Walrus + registry]
+
+    HA -.->|"no CAI/callback configured"| Inline[inline runPipeline:<br/>score → publish → write]
+    Inline --> Registry
 ```
 
 ### x402 lookup + payment (Arc)
@@ -210,7 +225,8 @@ See [docs/scoring.md](docs/scoring.md).
 ```
 packages/inspect-web3     Inspect tasks + scorers
 packages/walrus-client    walrus:// fsspec + HTTP client
-packages/marketplace-mcp  x402 MCP server
+packages/marketplace-mcp-ts  x402 MCP server (Arc, Circle Gateway) — current
+packages/marketplace-mcp     legacy Python x402 server (superseded by -ts)
 packages/identity         ENS + registry SDK
 packages/eval-runner      HTTP service for CRE
 apps/web                  Leaderboard, eval viewer, ENS resolver
