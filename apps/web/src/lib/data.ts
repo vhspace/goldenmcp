@@ -1,7 +1,6 @@
 import { createPublicClient, http, parseAbi } from "viem";
 import {
   aggregateVendorProfiles,
-  extractLatencyMsFromEvalLog,
   type LeaderboardEntry,
   type VendorProfile,
 } from "@/lib/vendors";
@@ -100,6 +99,7 @@ export interface ScoreManifest {
   walrus_blob_id?: string | null;
   walrus_manifest_blob_id?: string | null;
   walrus_index_blob_id?: string | null;
+  latency_ms?: number | null;
   attestation?: Record<string, unknown> | null;
   attestation_id?: string | null;
   [key: string]: unknown;
@@ -211,24 +211,14 @@ export async function fetchVendorProfiles(): Promise<VendorProfile[]> {
       }
 
       try {
+        // Latency comes straight from the manifest (eval-runner embeds it from the
+        // Inspect log's stats.total_time). The .eval log itself is a zstd ZIP we
+        // can't cheaply unzip in the browser, so we never fetch it for timing.
         const manifest = await fetchManifest(profile.mcp, profile.primaryCapability);
-        const evalRef = manifest.walrus_blob_id;
-        if (typeof evalRef !== "string" || !evalRef.trim()) {
-          profile.latencyError = "manifest has no walrus_blob_id for eval log";
-          return;
-        }
-        // Resolve direct or walrus:// indexed paths (via the manifest's embedded
-        // index blob) to a concrete aggregator URL, then read timing stats.
-        const evalLogUrl = await resolveEvalLogUrl(manifest);
-        const res = await fetch(evalLogUrl);
-        if (!res.ok) {
-          profile.latencyError = `eval log fetch failed: HTTP ${res.status}`;
-          return;
-        }
-        const evalLog = (await res.json()) as Record<string, unknown>;
-        profile.latencyMs = extractLatencyMsFromEvalLog(evalLog);
-        if (profile.latencyMs === null) {
-          profile.latencyError = "eval log has no timing stats (stats.total_time missing)";
+        if (typeof manifest.latency_ms === "number" && manifest.latency_ms > 0) {
+          profile.latencyMs = manifest.latency_ms;
+        } else {
+          profile.latencyError = "manifest has no latency_ms (re-run eval to populate timing)";
         }
       } catch (err) {
         profile.latencyError = err instanceof Error ? err.message : String(err);
