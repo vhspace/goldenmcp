@@ -95,6 +95,39 @@ PAYEE_ADDRESS="$(cast wallet address --private-key "${MARKETPLACE_WALLET_PRIVATE
 log()  { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 note() { printf '    %s\n' "$*"; }
 
+# Robustly decode the MCPRegistry.getRecord(uint256) tuple. cast 0.3.0 mangles
+# the nested dynamic tuple when given the typed signature, so we fetch the raw
+# ABI return data and decode it in python. Echoes three lines:
+#   <lastAttestationId>\n<lastTranscriptHash 0x...>\n<exists true|false>
+decode_get_record() {
+  local agent_id="$1"
+  local raw
+  raw="$(cast call "${ARC_REGISTRY_ADDRESS}" 'getRecord(uint256)' "${agent_id}" \
+    --rpc-url "${ARC_RPC_URL}")"
+  RAW="${raw}" python3 - <<'PY'
+import os
+h = os.environ["RAW"]
+h = h[2:] if h[:2] == "0x" else h
+b = bytes.fromhex(h)
+def word(i): return b[i*32:(i+1)*32]
+def u(i): return int.from_bytes(word(i), "big")
+base = u(0) // 32  # outer tuple offset
+def readstr(slot):
+    off = u(base + slot) // 32
+    a = base + off
+    n = u(a)
+    return b[(a + 1) * 32:(a + 1) * 32 + n].decode("utf-8", "replace")
+# tuple: name, mcpEndpoint, agentUri, ensName, lastAttestationId,
+#        lastTranscriptHash, exists
+last_attestation_id = readstr(4)
+last_transcript_hash = "0x" + word(base + 5).hex()
+exists = "true" if u(base + 6) else "false"
+print(last_attestation_id)
+print(last_transcript_hash)
+print(exists)
+PY
+}
+
 # Run a heredoc script on the droplet with /etc/goldenmcp/.env sourced. The
 # script body is piped over stdin so we never wrestle with nested ssh quoting.
 # Usage: droplet_run <<'EOSH' ... EOSH
@@ -144,11 +177,9 @@ note "trigger is listening on ${DROPLET_IP}:2000"
 log "Step 2/8 — ensure agent ${AGENT_ID} (${MCP_NAME}) exists in the registry"
 
 agent_exists=0
-if record_raw="$(cast call "${ARC_REGISTRY_ADDRESS}" \
-      'getRecord(uint256)(string,string,string,string,string,bytes32,bool)' \
-      "${AGENT_ID}" --rpc-url "${ARC_RPC_URL}" 2>/dev/null)"; then
-  # The trailing field (exists bool) is the last line of cast's tuple output.
-  if printf '%s\n' "${record_raw}" | tail -1 | grep -qi 'true'; then
+if record_raw="$(decode_get_record "${AGENT_ID}" 2>/dev/null)"; then
+  # Line 3 of the decoder output is the exists bool.
+  if [[ "$(printf '%s\n' "${record_raw}" | sed -n '3p')" == "true" ]]; then
     agent_exists=1
   fi
 fi
@@ -306,14 +337,10 @@ note "published — walrus_manifest_blob_id=${WALRUS_BLOB_ID:-<none>}"
 # ============================================================================
 log "Step 8/8 — read on-chain getRecord(${AGENT_ID}) + harvest trigger log"
 
-# getRecord returns the tuple in declaration order; pull the fields we need.
-record_out="$(cast call "${ARC_REGISTRY_ADDRESS}" \
-  'getRecord(uint256)(string,string,string,string,string,bytes32,bool)' \
-  "${AGENT_ID}" --rpc-url "${ARC_RPC_URL}")"
-# Fields (one per line): name, mcpEndpoint, agentUri, ensName,
-# lastAttestationId, lastTranscriptHash, exists.
-ON_CHAIN_ATTESTATION_ID="$(printf '%s\n' "${record_out}" | sed -n '5p' | tr -d '"' | tr -d '[:space:]')"
-ON_CHAIN_TRANSCRIPT_HASH="$(printf '%s\n' "${record_out}" | sed -n '6p' | tr -d '[:space:]')"
+# decode_get_record emits: lastAttestationId / lastTranscriptHash / exists.
+record_out="$(decode_get_record "${AGENT_ID}")"
+ON_CHAIN_ATTESTATION_ID="$(printf '%s\n' "${record_out}" | sed -n '1p')"
+ON_CHAIN_TRANSCRIPT_HASH="$(printf '%s\n' "${record_out}" | sed -n '2p' | tr -d '[:space:]')"
 
 # The deployer/payee Arc balance (Arc's native gas token is USDC).
 PAYEE_BALANCE_WEI="$(cast balance "${PAYEE_ADDRESS}" --rpc-url "${ARC_RPC_URL}" 2>/dev/null || echo 0)"
