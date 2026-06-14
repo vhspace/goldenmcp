@@ -132,8 +132,15 @@ PY
 # script body is piped over stdin so we never wrestle with nested ssh quoting.
 # Usage: droplet_run <<'EOSH' ... EOSH
 droplet_run() {
+  # Forward caller vars across ssh as `NAME=value` args (env prefixes do NOT
+  # cross ssh). The remote shell sources the droplet env (secrets), pins
+  # EVAL_RUNNER_BASE to localhost (the eval-runner is local to the droplet),
+  # exports the forwarded vars, then runs the heredoc piped on stdin.
+  local assigns="EVAL_RUNNER_BASE=http://localhost"
+  local kv
+  for kv in "$@"; do assigns+=" $(printf '%q' "${kv}")"; done
   ssh -o BatchMode=yes -o ConnectTimeout=15 "${DROPLET_SSH}" \
-    "set -euo pipefail; set -a; source ${DROPLET_ENV}; set +a; bash -s"
+    "set -euo pipefail; set -a; source ${DROPLET_ENV}; export ${assigns}; set +a; bash -s"
 }
 
 # ============================================================================
@@ -201,8 +208,7 @@ fi
 # ============================================================================
 log "Step 3/8 — POST /eval/score (${MCP_NAME}/${CAPABILITY}) on the droplet"
 
-RUN_ID="$(EVAL_RUNNER_BASE="${EVAL_RUNNER_BASE}" MCP_NAME="${MCP_NAME}" \
-  CAPABILITY="${CAPABILITY}" droplet_run <<'EOSH'
+RUN_ID="$(droplet_run "MCP_NAME=${MCP_NAME}" "CAPABILITY=${CAPABILITY}" <<'EOSH'
 score_resp="$(curl -fsS -X POST "${EVAL_RUNNER_BASE}/eval/score" \
   -H "Authorization: Bearer ${EVAL_RUNNER_API_KEY}" \
   -H "Content-Type: application/json" \
@@ -221,9 +227,9 @@ note "run_id=${RUN_ID}"
 # ============================================================================
 log "Step 4/8 — submit CAI inference (callback -> ${TRIGGER_URL})"
 
-INFERENCE_ID="$(EVAL_RUNNER_BASE="${EVAL_RUNNER_BASE}" CAI_URL="${CAI_URL}" \
-  CAI_API_KEY="${CHAINLINK_CAI_API_KEY}" TRIGGER_URL="${TRIGGER_URL}" \
-  RUN_ID="${RUN_ID}" droplet_run <<'EOSH'
+INFERENCE_ID="$(droplet_run "TRIGGER_URL=${TRIGGER_URL}" "RUN_ID=${RUN_ID}" <<'EOSH'
+CAI_URL="${CHAINLINK_CAI_URL:-https://confidential-ai-dev-preview.cldev.cloud}"
+CAI_API_KEY="${CHAINLINK_CAI_API_KEY}"
 # Pull the scored manifest for this run from the eval-runner.
 run_json="$(curl -fsS "${EVAL_RUNNER_BASE}/eval/runs/${RUN_ID}" \
   -H "Authorization: Bearer ${EVAL_RUNNER_API_KEY}")"
@@ -269,8 +275,7 @@ note "inference_id=${INFERENCE_ID}"
 # ============================================================================
 log "Step 5/8 — POST /eval/cai-submitted (map inference_id -> run_id)"
 
-EVAL_RUNNER_BASE="${EVAL_RUNNER_BASE}" INFERENCE_ID="${INFERENCE_ID}" \
-  RUN_ID="${RUN_ID}" droplet_run <<'EOSH'
+droplet_run "INFERENCE_ID=${INFERENCE_ID}" "RUN_ID=${RUN_ID}" <<'EOSH'
 curl -fsS -X POST "${EVAL_RUNNER_BASE}/eval/cai-submitted" \
   -H "Authorization: Bearer ${EVAL_RUNNER_API_KEY}" \
   -H "Content-Type: application/json" \
@@ -286,10 +291,10 @@ log "Step 6/8 — poll GET /v1/inference/${INFERENCE_ID} until completed"
 
 cai_status=""
 for attempt in $(seq 1 60); do
-  cai_status="$(CAI_URL="${CAI_URL}" CAI_API_KEY="${CHAINLINK_CAI_API_KEY}" \
-    INFERENCE_ID="${INFERENCE_ID}" droplet_run <<'EOSH'
+  cai_status="$(droplet_run "INFERENCE_ID=${INFERENCE_ID}" <<'EOSH'
+CAI_URL="${CHAINLINK_CAI_URL:-https://confidential-ai-dev-preview.cldev.cloud}"
 resp="$(curl -fsS "${CAI_URL}/v1/inference/${INFERENCE_ID}" \
-  -H "Authorization: Bearer ${CAI_API_KEY}")"
+  -H "Authorization: Bearer ${CHAINLINK_CAI_API_KEY}")"
 python3 -c "import sys,json; print(json.load(sys.stdin).get('status','unknown'))" <<<"${resp}"
 EOSH
 )"
@@ -313,8 +318,7 @@ log "Step 7/8 — poll GET /eval/runs/${RUN_ID} until status=published"
 WALRUS_BLOB_ID=""
 run_status=""
 for attempt in $(seq 1 60); do
-  run_out="$(EVAL_RUNNER_BASE="${EVAL_RUNNER_BASE}" RUN_ID="${RUN_ID}" \
-    droplet_run <<'EOSH'
+  run_out="$(droplet_run "RUN_ID=${RUN_ID}" <<'EOSH'
 resp="$(curl -fsS "${EVAL_RUNNER_BASE}/eval/runs/${RUN_ID}" \
   -H "Authorization: Bearer ${EVAL_RUNNER_API_KEY}")"
 python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','unknown')); print(d.get('walrus_manifest_blob_id') or '')" <<<"${resp}"
