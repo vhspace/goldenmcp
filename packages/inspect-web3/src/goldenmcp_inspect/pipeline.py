@@ -89,6 +89,8 @@ def publish_manifest_to_walrus(
 
     _, fs = upload_inspect_log_bytes(log_bytes, eval_walrus_path, filesystem=filesystem)
     manifest.walrus_blob_id = eval_walrus_path
+    # Embed the index blob so the manifest self-resolves its walrus:// eval path.
+    manifest.walrus_index_blob_id = fs.index.index_blob_id
 
     client = walrus or WalrusClient()
     manifest.walrus_manifest_blob_id = client.upload_json(manifest.to_public_dict())
