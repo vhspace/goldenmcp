@@ -23,6 +23,9 @@ From repo root:
 
 # Health check (self-signed TLS — use -k)
 curl -k "https://$(terraform -chdir=infra/terraform/eval-runner output -raw droplet_ip)/health"
+
+# Discover IP + SSH key without DO API (agents: see .cursor/skills/terraform-eval-runner-discover/)
+./scripts/terraform-eval-runner-info.sh
 ```
 
 ## Secrets
