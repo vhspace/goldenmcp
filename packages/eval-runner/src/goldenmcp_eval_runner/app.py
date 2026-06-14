@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from goldenmcp_eval_runner.auth import require_api_key, require_cai_webhook_secret
 from goldenmcp_eval_runner.inspect_logs import read_inspect_log_file
 from goldenmcp_eval_runner.jobs import EvalJob, eval_jobs, JobStatus
-from goldenmcp_eval_runner.pending_runs import cai_callbacks, inference_index
+from goldenmcp_eval_runner.pending_runs import benchmark_cursor, cai_callbacks, inference_index
 from goldenmcp_eval_runner.settings import RunnerSettings, get_settings
 from goldenmcp_inspect.benchmarks import list_benchmarks, load_benchmark
 from goldenmcp_inspect.manifest import transcript_from_inspect_log
@@ -412,6 +412,22 @@ def health():
 @app.get("/benchmarks")
 def benchmarks():
     return {"benchmarks": [{"mcp": m, "capability": c} for m, c in list_benchmarks()]}
+
+
+@app.get("/benchmarks/next")
+def benchmarks_next():
+    """Return the next benchmark in a round-robin and advance the cursor.
+
+    The CRE cron handler runs ONE benchmark per fire (to stay under the CRE
+    simulator's HTTP-call cap); calling this each fire cycles through all of
+    them. Includes index/total so the caller can log progress.
+    """
+    items = list_benchmarks()
+    if not items:
+        raise HTTPException(status_code=404, detail="no benchmarks available")
+    idx = benchmark_cursor.next_index(len(items))
+    mcp, capability = items[idx]
+    return {"mcp": mcp, "capability": capability, "index": idx, "total": len(items)}
 
 
 @app.get(

@@ -69,40 +69,67 @@ async function submitForAttestation(runtime: Runtime<Config>, target: PipelineTa
   return `${target.mcp}/${target.capability}:queued:${inferenceId}`;
 }
 
+/** Ask the eval-runner for the next benchmark in its round-robin (one per fire). */
+function fetchNextBenchmark(runtime: Runtime<Config>): { mcp: string; capability: string; index: number; total: number } {
+  const resp = httpClient
+    .sendRequest(runtime, {
+      url: `${runtime.config.evalRunnerUrl.replace(/\/$/, "")}/benchmarks/next`,
+      method: "GET",
+    })
+    .result();
+  if (!ok(resp)) {
+    throw new Error(`GET /benchmarks/next failed: HTTP ${resp.statusCode} — ${text(resp)}`);
+  }
+  return JSON.parse(text(resp)) as { mcp: string; capability: string; index: number; total: number };
+}
+
 async function onCronTrigger(runtime: Runtime<Config>): Promise<string> {
   const config = runtime.config;
   runtime.log("GoldenMCP eval pipeline cron triggered");
 
-  const benchmarksResponse = httpClient
-    .sendRequest(runtime, {
-      url: `${config.evalRunnerUrl.replace(/\/$/, "")}/benchmarks`,
-      method: "GET",
-    })
-    .result();
-
-  if (!ok(benchmarksResponse)) {
-    throw new Error(
-      `GET /benchmarks failed: HTTP ${benchmarksResponse.statusCode} — ${text(benchmarksResponse)}`,
-    );
-  }
-
-  const benchmarks = JSON.parse(text(benchmarksResponse)) as {
-    benchmarks?: Array<{ mcp: string; capability: string }>;
-  };
-  const allItems = benchmarks.benchmarks ?? [];
-  const items = filterBenchmarks(config, allItems);
-  if (items.length !== allItems.length) {
+  // Rotation mode: run exactly ONE benchmark per fire (eval-runner cursor),
+  // cycling through all of them across successive fires. Keeps each execution
+  // under the CRE per-workflow HTTP-call cap and gives every benchmark its own
+  // attested run. Enabled with rotateBenchmarks=true (the droplet/full target).
+  let items: Array<{ mcp: string; capability: string }>;
+  if (config.rotateBenchmarks) {
+    const next = fetchNextBenchmark(runtime);
     runtime.log(
-      `benchmarkAllowlist active — running ${items.length}/${allItems.length} benchmarks: ${items.map((b) => benchmarkKey(b.mcp, b.capability)).join(", ")}`,
+      `rotateBenchmarks — fire runs ${next.mcp}/${next.capability} (#${next.index + 1}/${next.total})`,
     );
+    items = [{ mcp: next.mcp, capability: next.capability }];
   } else {
-    runtime.log(`Found ${items.length} benchmarks`);
-  }
+    const benchmarksResponse = httpClient
+      .sendRequest(runtime, {
+        url: `${config.evalRunnerUrl.replace(/\/$/, "")}/benchmarks`,
+        method: "GET",
+      })
+      .result();
 
-  if (config.useScoreOnly && items.length === 0) {
-    throw new Error(
-      "useScoreOnly=true but no benchmarks matched benchmarkAllowlist — set allowlist e.g. lifi/quote",
-    );
+    if (!ok(benchmarksResponse)) {
+      throw new Error(
+        `GET /benchmarks failed: HTTP ${benchmarksResponse.statusCode} — ${text(benchmarksResponse)}`,
+      );
+    }
+
+    const benchmarks = JSON.parse(text(benchmarksResponse)) as {
+      benchmarks?: Array<{ mcp: string; capability: string }>;
+    };
+    const allItems = benchmarks.benchmarks ?? [];
+    items = filterBenchmarks(config, allItems);
+    if (items.length !== allItems.length) {
+      runtime.log(
+        `benchmarkAllowlist active — running ${items.length}/${allItems.length} benchmarks: ${items.map((b) => benchmarkKey(b.mcp, b.capability)).join(", ")}`,
+      );
+    } else {
+      runtime.log(`Found ${items.length} benchmarks`);
+    }
+
+    if (config.useScoreOnly && items.length === 0) {
+      throw new Error(
+        "useScoreOnly=true but no benchmarks matched benchmarkAllowlist — set allowlist e.g. lifi/quote",
+      );
+    }
   }
 
   // Async (callback) mode: submit CAI inference per target and return; the HTTP

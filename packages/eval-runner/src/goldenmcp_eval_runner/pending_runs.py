@@ -89,6 +89,30 @@ class InferenceIndex:
         return len(self._by_inference_id)
 
 
+class BenchmarkCursor:
+    """Round-robin cursor over the benchmark list.
+
+    The CRE cron handler runs ONE benchmark per fire (to stay under the CRE
+    simulator's per-execution HTTP-call cap); this cursor hands out the next
+    benchmark each call so successive fires cover all of them. In-memory —
+    resets to the start on eval-runner restart, which is fine for the demo.
+    """
+
+    def __init__(self) -> None:
+        self._index = 0
+
+    def next_index(self, length: int) -> int:
+        if length <= 0:
+            raise ValueError("no benchmarks to rotate over")
+        i = self._index % length
+        self._index = (self._index + 1) % length
+        return i
+
+    def peek(self) -> int:
+        return self._index
+
+
 pending_runs = PendingRunStore()
 cai_callbacks = CaiCallbackStore()
 inference_index = InferenceIndex()
+benchmark_cursor = BenchmarkCursor()

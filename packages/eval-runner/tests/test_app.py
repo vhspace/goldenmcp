@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from goldenmcp_eval_runner.app import app
 from goldenmcp_eval_runner.jobs import eval_jobs
-from goldenmcp_eval_runner.pending_runs import cai_callbacks, inference_index
+from goldenmcp_eval_runner.pending_runs import benchmark_cursor, cai_callbacks, inference_index
 from goldenmcp_eval_runner.settings import get_settings
 
 
@@ -55,6 +55,7 @@ def clear_stores():
     eval_jobs._jobs.clear()
     cai_callbacks._by_run_id.clear()
     inference_index._by_inference_id.clear()
+    benchmark_cursor._index = 0
     yield
     eval_jobs._jobs.clear()
     cai_callbacks._by_run_id.clear()
@@ -109,6 +110,20 @@ def test_benchmarks_no_auth(client):
     response = client.get("/benchmarks")
     assert response.status_code == 200
     assert "benchmarks" in response.json()
+
+
+def test_benchmarks_next_round_robins(client):
+    total = len(client.get("/benchmarks").json()["benchmarks"])
+    assert total > 0
+    seen = []
+    for i in range(total):
+        body = client.get("/benchmarks/next").json()
+        assert body["index"] == i
+        assert body["total"] == total
+        seen.append((body["mcp"], body["capability"]))
+    # One full cycle covers every benchmark exactly once, then wraps to index 0.
+    assert len(set(seen)) == total
+    assert client.get("/benchmarks/next").json()["index"] == 0
 
 
 def test_eval_score_rejects_when_api_key_unset(monkeypatch):
