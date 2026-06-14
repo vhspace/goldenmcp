@@ -7,7 +7,7 @@ import {
   TxStatus,
   type Runtime,
 } from "@chainlink/cre-sdk";
-import { encodeFunctionData, parseAbi, sha256, stringToHex, type Hex } from "viem";
+import { encodeAbiParameters, parseAbiParameters, sha256, stringToHex, type Hex } from "viem";
 import type {
   CaiAttestation,
   Config,
@@ -19,10 +19,10 @@ import type {
 const httpClient = new HTTPClient();
 const CRE_HTTP_TIMEOUT = "8s";
 
-const MCP_REGISTRY_ABI = parseAbi([
-  "function updateCapabilityScore(uint256 agentId, string capability, uint16 dataScoreBps, uint16 pathScoreBps, uint16 tokenEfficiencyBps, uint16 compositeBps, bool failed, string walrusBlobId) external",
-  "function recordAttestation(uint256 agentId, string inferenceId, bytes32 transcriptHash) external",
-]);
+// Report kinds — first field of the ABI-encoded CRE report; MCPRegistry.onReport
+// decodes on these to dispatch to the score vs attestation write.
+const KIND_SCORE = 1;
+const KIND_ATTESTATION = 2;
 
 const MINIMAL_SCORE_TRANSCRIPT = {
   events: [
@@ -688,11 +688,11 @@ export async function writeAttestationToArc(
   const ZERO_BYTES32 = `0x${"0".repeat(64)}` as Hex;
   const transcriptHash = (attestation.transcript_hash?.trim() || ZERO_BYTES32) as Hex;
   runtime.log(`Arc recordAttestation agentId=${agentId} inference_id=${attestation.inference_id}`);
-  const recordData = encodeFunctionData({
-    abi: MCP_REGISTRY_ABI,
-    functionName: "recordAttestation",
-    args: [BigInt(agentId), attestation.inference_id.trim(), transcriptHash],
-  });
+  // Tagged report tuple decoded by MCPRegistry.onReport (kind=2 attestation).
+  const recordData = encodeAbiParameters(
+    parseAbiParameters("uint8 kind, uint256 agentId, string inferenceId, bytes32 transcriptHash"),
+    [KIND_ATTESTATION, BigInt(agentId), attestation.inference_id.trim(), transcriptHash],
+  );
   const attestationRecordTxHash = writeRegistryReport(
     runtime,
     arc.evmClient,
@@ -717,10 +717,13 @@ export async function writeScoreToArc(
   runtime.log(
     `Arc updateCapabilityScore agentId=${agentId} capability=${capability} walrus=${walrusBlobId}`,
   );
-  const updateData = encodeFunctionData({
-    abi: MCP_REGISTRY_ABI,
-    functionName: "updateCapabilityScore",
-    args: [
+  // Tagged report tuple decoded by MCPRegistry.onReport (kind=1 score).
+  const updateData = encodeAbiParameters(
+    parseAbiParameters(
+      "uint8 kind, uint256 agentId, string capability, uint16 dataScoreBps, uint16 pathScoreBps, uint16 tokenEfficiencyBps, uint16 compositeBps, bool failed, string walrusBlobId",
+    ),
+    [
+      KIND_SCORE,
       BigInt(agentId),
       capability,
       scoreToBps(manifest.data_score),
@@ -730,7 +733,7 @@ export async function writeScoreToArc(
       manifest.failed,
       walrusBlobId,
     ],
-  });
+  );
   const scoreTxHash = writeRegistryReport(
     runtime,
     arc.evmClient,

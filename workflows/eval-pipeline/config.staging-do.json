@@ -6,16 +6,18 @@
   "creCallbackUrl": "http://165.227.74.149:2000/trigger",
   "authorizedKeys": [],
   "walrusAggregatorUrl": "https://aggregator.walrus-testnet.walrus.space",
-  "arcRegistryAddress": "0xae264f008b37570cc6b22552f623b7e8c73d8123",
+  "arcRegistryAddress": "0x8db02877046c8fA3c8c6Abb2565094Ca29E820e3",
   "arcChainSelector": "arc-testnet",
   "defaultAgentId": 1,
   "useScoreOnly": false,
   "pollBusyWait": true,
-  "benchmarkAllowlist": ["lifi/quote"],
+  "benchmarkAllowlist": [
+    "lifi/quote"
+  ],
   "caiPollMaxAttempts": 60,
   "caiPollIntervalMs": 2000,
   "inspectPollMaxAttempts": 300,
   "inspectPollIntervalMs": 2000,
-  "publishPollMaxAttempts": 60,
-  "publishPollIntervalMs": 2000
+  "publishPollMaxAttempts": 8,
+  "publishPollIntervalMs": 6000
 }
