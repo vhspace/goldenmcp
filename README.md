@@ -41,7 +41,7 @@ The marketplace MCP is x402-gated: lookups return HTTP 402 with a USDC price unt
 | x402-gated lookup server (402 challenge, price ladder, settlement) | [`packages/marketplace-mcp/src/goldenmcp_marketplace/app.py`](https://github.com/vhspace/goldenmcp/blob/main/packages/marketplace-mcp/src/goldenmcp_marketplace/app.py) |
 | MCP registry contract (`register`, `updateCapabilityScore`, `recordAttestation`) | [`contracts/mcp-registry/src/MCPRegistry.sol`](https://github.com/vhspace/goldenmcp/blob/main/contracts/mcp-registry/src/MCPRegistry.sol) |
 | Arc deploy script | [`contracts/mcp-registry/script/Deploy.s.sol`](https://github.com/vhspace/goldenmcp/blob/main/contracts/mcp-registry/script/Deploy.s.sol) |
-| x402 lookup agent demo | [`demo/lookup_agent.py`](https://github.com/vhspace/goldenmcp/blob/main/demo/lookup_agent.py) |
+| x402 nanopayments seller + buyer (Circle Gateway, Arc) | [`packages/marketplace-mcp-ts/`](https://github.com/vhspace/goldenmcp/blob/main/packages/marketplace-mcp-ts/) |
 | CRE → Arc registry write (`writeToArc`) | [`workflows/eval-pipeline/src/pipeline.ts`](https://github.com/vhspace/goldenmcp/blob/main/workflows/eval-pipeline/src/pipeline.ts) |
 
 ### Sui / Walrus — eval blob storage (not a bounty)
@@ -87,8 +87,8 @@ An agent asks the marketplace for the best MCP for a capability. The first call 
 
 ```mermaid
 sequenceDiagram
-    participant Agent as lookup_agent.py
-    participant Market as marketplace-mcp (x402)
+    participant Agent as lookup_agent.ts (GatewayClient)
+    participant Market as marketplace-mcp-ts (x402 nanopayments)
     participant Reg as MCPRegistry (Arc)
     participant Wal as Walrus
 
@@ -148,11 +148,11 @@ uv run inspect eval goldenmcp/odos_quote --model anthropic/claude-3-5-haiku-2024
 # eval-runner HTTP service (the API the CRE workflow calls)
 uv run python -m goldenmcp_eval_runner
 
-# Marketplace MCP (x402-gated lookup)
-uv run python -m goldenmcp_marketplace
+# Marketplace seller (x402 nanopayments via Circle Gateway, Arc testnet)
+(cd packages/marketplace-mcp-ts && bun install && bun src/server.ts)
 
-# x402 lookup agent demo (needs Arc wallet + x402)
-uv run python demo/lookup_agent.py --capability quote --min-score 0.9
+# x402 buyer agent demo (EOA funded with Arc testnet USDC + native gas)
+cd packages/marketplace-mcp-ts && DEMO_PAYER_PRIVATE_KEY=0x... bun demo/lookup_agent.ts --capability quote --min-score 0.9
 
 # Web demo (leaderboard, eval viewer, ENS resolver)
 cd apps/web && bun install && bun run dev

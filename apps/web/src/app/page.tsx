@@ -11,7 +11,7 @@ export default function Home() {
         <li><Link href="/ens">ENS Resolver</Link> — resolve MCP names to endpoints and eval blobs</li>
       </ul>
       <p style={{ color: "#888", marginTop: "2rem" }}>
-        x402 lookup demo: <code>uv run python demo/lookup_agent.py --capability quote --min-score 0.9</code>
+        x402 lookup demo: <code>cd packages/marketplace-mcp-ts && bun demo/lookup_agent.ts --capability quote --min-score 0.9</code>
       </p>
     </div>
   );
