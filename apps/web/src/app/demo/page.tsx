@@ -1,9 +1,43 @@
 import { fetchVendorProfiles } from "@/lib/data";
-import { VendorPerformanceCard } from "@/components/VendorPerformanceCard";
+import { DemoDashboardLayout } from "@/components/demo/DemoDashboardLayout";
+import { VendorMarketplaceTable } from "@/components/demo/VendorMarketplaceTable";
+import styles from "@/components/demo/demo-dashboard.module.css";
 import { ChatConcierge } from "@/components/ChatConcierge";
 import { GOLDEN_SCORE_THRESHOLDS, METER_THRESHOLDS, type VendorProfile } from "@/lib/vendors";
 
 export const dynamic = "force-dynamic";
+
+function DemoRightRail() {
+  return (
+    <>
+      <div className={`${styles.railCard} ${styles.railCardGold}`}>
+        <p className={styles.railTitle}>AI-Powered Risk Control</p>
+        <p className={styles.railText}>
+          Chainlink CAI attestation in TEE — inference IDs and transcript hashes written to Arc
+          registry.
+        </p>
+        <a className={styles.railLink} href="#vendors">
+          View vendors ↓
+        </a>
+      </div>
+      <div className={styles.railCard}>
+        <p className={styles.railTitle}>x402 Marketplace</p>
+        <p className={styles.railText}>
+          Lookup returns HTTP 402 until USDC settles on Arc testnet — live micropayment gate, not a
+          mock.
+        </p>
+      </div>
+      <div className={styles.railCard}>
+        <p className={styles.railTitle}>Score thresholds</p>
+        <p className={styles.railText}>
+          Excellent ≥ {GOLDEN_SCORE_THRESHOLDS.excellentMin * 100}% · Good ≥{" "}
+          {GOLDEN_SCORE_THRESHOLDS.goodMin * 100}% · Meters green ≥ {METER_THRESHOLDS.greenMin * 100}
+          %
+        </p>
+      </div>
+    </>
+  );
+}
 
 export default async function DemoPage() {
   let vendors: VendorProfile[] = [];
@@ -16,82 +50,34 @@ export default async function DemoPage() {
   }
 
   return (
-    <div>
-      <header style={{ marginBottom: "2rem" }}>
-        <h1 style={{ margin: 0 }}>GoldenMCP Demo</h1>
-        <p style={{ color: "#aaa", marginTop: "0.5rem", maxWidth: "52rem" }}>
-          Hackathon judge demo — run pre-baked prompts, browse ENS-verified vendors, and inspect live
-          K=3 Golden Scores from Arc + Walrus.
+    <DemoDashboardLayout rightRail={<DemoRightRail />}>
+      <section id="concierge">
+        <h2 className={styles.panelTitle}>GoldenMCP Concierge</h2>
+        <p className={styles.panelSub}>
+          Natural-language MCP discovery — paid marketplace lookup via x402 USDC on Arc.
         </p>
-      </header>
-
-      <ChatConcierge />
-
-      <section style={{ marginTop: "2.5rem" }}>
-        <h2 style={{ margin: "0 0 1.25rem", fontSize: "1.35rem" }}>Global Overview Room</h2>
-
-      {error && (
-        <div
-          style={{
-            background: "#2a1010",
-            border: "1px solid #f87171",
-            borderRadius: "8px",
-            padding: "1rem",
-            marginBottom: "1.5rem",
-            color: "#fca5a5",
-          }}
-        >
-          <strong>Marketplace unavailable</strong>
-          <p style={{ margin: "0.5rem 0 0", fontFamily: "monospace", fontSize: "0.85rem" }}>{error}</p>
-        </div>
-      )}
-
-      {vendors.length === 0 && !error && (
-        <p style={{ color: "#888" }}>No registered vendors — run evals and register MCPs on Arc first.</p>
-      )}
-
-      {vendors.length > 0 && (
-        <>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-              gap: "1.25rem",
-            }}
-          >
-            {vendors.map((vendor) => (
-              <VendorPerformanceCard key={`${vendor.vendorName}-${vendor.mcp}`} vendor={vendor} />
-            ))}
-          </div>
-
-          <aside
-            style={{
-              marginTop: "2.5rem",
-              padding: "1rem",
-              background: "#111",
-              borderRadius: "8px",
-              border: "1px solid #222",
-              fontSize: "0.8rem",
-              color: "#888",
-            }}
-          >
-            <strong style={{ color: "#ccc" }}>Score thresholds</strong>
-            <ul style={{ margin: "0.5rem 0 0", paddingLeft: "1.25rem" }}>
-              <li>
-                Golden Score: Excellent ≥ {GOLDEN_SCORE_THRESHOLDS.excellentMin * 100}%, Good ≥{" "}
-                {GOLDEN_SCORE_THRESHOLDS.goodMin * 100}%, Warning ≥{" "}
-                {GOLDEN_SCORE_THRESHOLDS.warningMin * 100}%
-              </li>
-              <li>
-                Meters: Green ≥ {METER_THRESHOLDS.greenMin * 100}%, Yellow ≥{" "}
-                {METER_THRESHOLDS.yellowMin * 100}%, Red below
-              </li>
-              <li>Cost Efficiency = token optimization · Reliability = data correctness</li>
-            </ul>
-          </aside>
-        </>
-      )}
+        <ChatConcierge embedded />
       </section>
-    </div>
+
+      <section id="vendors" style={{ marginTop: "1.5rem" }}>
+        <h2 className={styles.panelTitle}>Global Overview — MCP Vendors</h2>
+        <p className={styles.panelSub}>
+          Ranked by Golden Score from live Arc registry reads and Walrus eval manifests.
+        </p>
+
+        {error && (
+          <div className={styles.errorBanner}>
+            <strong>Marketplace unavailable</strong>
+            <p style={{ margin: "0.35rem 0 0", fontFamily: "monospace" }}>{error}</p>
+          </div>
+        )}
+
+        {vendors.length === 0 && !error && (
+          <p className={styles.panelSub}>No registered vendors — run evals and register MCPs on Arc first.</p>
+        )}
+
+        <VendorMarketplaceTable vendors={vendors} />
+      </section>
+    </DemoDashboardLayout>
   );
 }
