@@ -1,11 +1,10 @@
-/** Live demo pipeline flight tracker — GH #82. */
+/** Live demo use-case workflow flight tracker — GH #82 / usecase workflow. */
 
 export type PipelineStepId =
-  | "user_prompt"
-  | "ens_discovery"
-  | "tee_sandbox"
-  | "execution_engine"
-  | "blockchain_proof";
+  | "user_trade_intent"
+  | "marketplace_mcp"
+  | "x402_price"
+  | "x402_settlement";
 
 export type PipelineStepStatus = "pending" | "active" | "complete" | "error";
 
@@ -30,12 +29,12 @@ export interface PipelineRunState {
   failedStep: PipelineStepId | null;
 }
 
+/** Use-case workflow: User @Permit → Marketplace MCP → Price → x402 settlement */
 export const PIPELINE_STEPS: PipelineStepDefinition[] = [
-  { id: "user_prompt", label: "User Prompt", shortLabel: "Prompt" },
-  { id: "ens_discovery", label: "ENS Discovery", shortLabel: "ENS" },
-  { id: "tee_sandbox", label: "TEE Sandbox Eval", shortLabel: "TEE" },
-  { id: "execution_engine", label: "Execution Engine", shortLabel: "Execute" },
-  { id: "blockchain_proof", label: "Blockchain Proof", shortLabel: "Proof" },
+  { id: "user_trade_intent", label: "User @Permit — I want to trade", shortLabel: "Permit" },
+  { id: "marketplace_mcp", label: "Marketplace MCP", shortLabel: "Marketplace" },
+  { id: "x402_price", label: "Price Gate", shortLabel: "Price" },
+  { id: "x402_settlement", label: "x402 Settlement", shortLabel: "x402" },
 ];
 
 export function stepIndex(id: PipelineStepId): number {
@@ -96,23 +95,75 @@ export function applyStepUpdate(
   };
 }
 
-export interface EnsDiscoveryResult {
+/** True when every step is pending with no detail — fresh run (GH #82 acceptance). */
+export function isFreshPipelineState(state: PipelineRunState): boolean {
+  return (
+    state.failedStep === null &&
+    state.activeStep === null &&
+    state.steps.every((s) => s.status === "pending" && s.detail === null && s.error === null)
+  );
+}
+
+/** Parse x402-price API detail `{ price, execution }` for the client orchestrator. */
+export function parseX402PriceStepDetail(detail: unknown): {
+  price: Record<string, unknown>;
+  execution: ExecutionResult;
+} {
+  if (!detail || typeof detail !== "object") {
+    throw new Error("x402-price response missing detail object");
+  }
+  const body = detail as Record<string, unknown>;
+  const price = body.price;
+  const execution = body.execution;
+  if (!price || typeof price !== "object" || !execution || typeof execution !== "object") {
+    throw new Error("x402-price response must include price and execution");
+  }
+  return { price: price as Record<string, unknown>, execution: execution as ExecutionResult };
+}
+
+export interface MarketplaceCandidate {
+  mcp: string;
+  ensName: string;
+  capability: string;
+  composite: number;
+  attestationRef: string;
+  walrusBlobId: string;
+}
+
+export interface MarketplaceMcpResult {
   ensName: string;
   mcp: string;
   capability: string;
   composite: number;
   mcpEndpoint: string;
   ensRecords: Record<string, string>;
+  candidates: MarketplaceCandidate[];
   summary: string;
 }
 
-export interface TeeSandboxResult {
-  secured: boolean;
-  badge: string;
-  inferenceId: string | null;
-  verdict: string | null;
-  transcriptHash: string | null;
+export interface X402PriceResult {
+  minScore: number;
+  priceUsdc: number | null;
+  priceLabel: string;
+  capability: string;
+  payee: string | null;
+  network: string;
+  paymentRequired: boolean;
 }
+
+export interface X402SettlementResult {
+  status: "payment_required" | "settled";
+  payee: string | null;
+  network: string;
+  priceUsdc: number | null;
+  registryAddress: string | null;
+  demoRoute: string;
+  mcpEndpoint: string | null;
+  summary: string;
+}
+
+/** @deprecated Use MarketplaceMcpResult — kept for pipeline-server internals */
+export type EnsDiscoveryResult = MarketplaceMcpResult;
 
 export interface ExecutionResult {
   httpStatus: number;
@@ -123,22 +174,4 @@ export interface ExecutionResult {
   results: Record<string, unknown>[] | null;
   payee?: string;
   network?: string;
-}
-
-export interface BlockchainProofResult {
-  kind: "x402_settlement" | "onchain_scores";
-  payee: string | null;
-  network: string | null;
-  priceUsdc: number | null;
-  walrusBlobId: string | null;
-  composite: number | null;
-  registryAddress: string | null;
-  summary: string;
-}
-
-export interface PipelineContext {
-  intent: Record<string, unknown>;
-  vendor?: EnsDiscoveryResult;
-  tee?: TeeSandboxResult;
-  execution?: ExecutionResult;
 }

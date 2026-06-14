@@ -1,21 +1,17 @@
-/** Server-side pipeline step runners — real Arc, ENS, Walrus, marketplace (GH #82). */
+/** Server-side use-case workflow steps — Arc registry, marketplace x402 (GH #82). */
 
-import {
-  fetchLeaderboard,
-  fetchManifest,
-  resolveENS,
-} from "@/lib/data";
+import { fetchLeaderboard, resolveENS } from "@/lib/data";
 import type {
-  BlockchainProofResult,
-  EnsDiscoveryResult,
   ExecutionResult,
-  TeeSandboxResult,
+  MarketplaceMcpResult,
+  X402PriceResult,
+  X402SettlementResult,
 } from "@/lib/pipeline";
 
-export async function runEnsDiscoveryStep(
+export async function runMarketplaceMcpStep(
   capability: string,
   minScore: number,
-): Promise<EnsDiscoveryResult> {
+): Promise<MarketplaceMcpResult> {
   const entries = await fetchLeaderboard();
   const matches = entries.filter(
     (e) =>
@@ -28,65 +24,106 @@ export async function runEnsDiscoveryStep(
 
   if (matches.length === 0) {
     throw new Error(
-      `No ENS-registered vendors for capability=${capability} with composite ≥ ${minScore} — run evals and register MCPs on Arc`,
+      `No marketplace MCPs for capability=${capability} with composite ≥ ${minScore} — register lifi/1inch on Arc and run evals`,
     );
   }
+
+  const candidates = matches.map((e) => ({
+    mcp: e.mcp,
+    ensName: e.ensName,
+    capability: e.capability,
+    composite: e.composite,
+    attestationRef: e.attestationRef,
+    walrusBlobId: e.walrusBlobId,
+  }));
 
   const best = matches[0];
   const ensRecords = await resolveENS(best.ensName);
-  if (!ensRecords["agent-endpoint[mcp]"] && !ensRecords["agent-context"]) {
-    throw new Error(
-      `ENSIP-25/26 records missing for ${best.ensName} — expected agent-context and agent-endpoint[mcp]`,
-    );
-  }
+  const endpoint = ensRecords["agent-endpoint[mcp]"] ?? "";
 
+  const vendorNames = [...new Set(candidates.map((c) => c.mcp))].join(", ");
   const pct = Math.round(best.composite * 100);
+
   return {
     ensName: best.ensName,
     mcp: best.mcp,
     capability: best.capability,
     composite: best.composite,
-    mcpEndpoint: ensRecords["agent-endpoint[mcp]"] ?? "",
+    mcpEndpoint: endpoint,
     ensRecords,
-    summary: `Found ${best.ensName} with verified ${pct}% Golden Score`,
+    candidates,
+    summary: `Marketplace goldenmcp — ${vendorNames} · selected ${best.mcp} @ ${pct}%`,
   };
 }
 
-export async function runTeeSandboxStep(vendor: EnsDiscoveryResult): Promise<TeeSandboxResult> {
-  const entries = await fetchLeaderboard();
-  const entry = entries.find(
-    (e) => e.mcp === vendor.mcp && e.capability === vendor.capability && e.ensName === vendor.ensName,
-  );
+/** @deprecated alias */
+export const runEnsDiscoveryStep = runMarketplaceMcpStep;
 
-  let manifestAttestation: Record<string, unknown> | null = null;
-  try {
-    const manifest = await fetchManifest(vendor.mcp, vendor.capability);
-    if (manifest.attestation && typeof manifest.attestation === "object") {
-      manifestAttestation = manifest.attestation as Record<string, unknown>;
-    }
-  } catch {
-    // Manifest may be unavailable; fall back to onchain attestation ref only.
-  }
+export interface X402PriceStepResult {
+  price: X402PriceResult;
+  execution: ExecutionResult;
+}
 
-  const inferenceId =
-    (entry?.attestationRef?.trim() || (manifestAttestation?.inference_id as string | undefined)) ??
-    null;
-  const verdict = (manifestAttestation?.verdict as string | undefined) ?? null;
-  const transcriptHash =
-    entry?.transcriptHash?.trim() ||
-    (manifestAttestation?.transcript_hash as string | undefined) ||
-    null;
+export async function runX402PriceStep(
+  capability: string,
+  minScore: number,
+): Promise<X402PriceStepResult> {
+  const execution = await runMarketplaceLookup(capability, minScore);
+  const priceUsdc = execution.priceUsdc;
+  const minPct = Math.round(minScore * 100);
 
   return {
-    secured: Boolean(inferenceId),
-    badge: "Secured via Hardware TEE (Gemma Sandboxed)",
-    inferenceId,
-    verdict,
-    transcriptHash,
+    price: {
+      minScore,
+      priceUsdc,
+      priceLabel:
+        priceUsdc !== null
+          ? `≥ ${minPct}% score · $${priceUsdc.toFixed(4)} USDC`
+          : `≥ ${minPct}% score`,
+      capability,
+      payee: execution.payee ?? null,
+      network: execution.network ?? "arc-testnet",
+      paymentRequired: execution.paymentRequired,
+    },
+    execution,
   };
 }
 
-export async function runExecutionStep(
+export async function runX402SettlementStep(
+  execution: ExecutionResult,
+  vendor: MarketplaceMcpResult,
+): Promise<X402SettlementResult> {
+  const registryAddress = process.env.NEXT_PUBLIC_REGISTRY_ADDRESS ?? null;
+
+  if (execution.paymentRequired) {
+    return {
+      status: "payment_required",
+      payee: execution.payee ?? null,
+      network: execution.network ?? "arc-testnet",
+      priceUsdc: execution.priceUsdc,
+      registryAddress,
+      demoRoute: vendor.mcp,
+      mcpEndpoint: vendor.mcpEndpoint || null,
+      summary: `x402 loop — settle $${execution.priceUsdc ?? "?"} USDC on Arc to unlock demo ${vendor.mcp}`,
+    };
+  }
+
+  const top = execution.results?.[0];
+  const endpoint = (top?.mcp_endpoint as string | undefined) ?? vendor.mcpEndpoint;
+
+  return {
+    status: "settled",
+    payee: null,
+    network: "arc-testnet",
+    priceUsdc: execution.priceUsdc,
+    registryAddress,
+    demoRoute: vendor.mcp,
+    mcpEndpoint: endpoint || null,
+    summary: `Payment settled — route to demo ${vendor.mcp}${endpoint ? ` @ ${endpoint}` : ""}`,
+  };
+}
+
+async function runMarketplaceLookup(
   capability: string,
   minScore: number,
 ): Promise<ExecutionResult> {
@@ -153,39 +190,5 @@ export async function runExecutionStep(
   };
 }
 
-export async function runBlockchainProofStep(
-  execution: ExecutionResult,
-  vendor: EnsDiscoveryResult,
-): Promise<BlockchainProofResult> {
-  const registryAddress = process.env.NEXT_PUBLIC_REGISTRY_ADDRESS ?? null;
-
-  if (execution.paymentRequired) {
-    return {
-      kind: "x402_settlement",
-      payee: execution.payee ?? null,
-      network: execution.network ?? "arc-testnet",
-      priceUsdc: execution.priceUsdc,
-      walrusBlobId: null,
-      composite: null,
-      registryAddress,
-      summary: `Circle USDC micropayment ${execution.priceUsdc ?? "?"} USDC pending via x402 on ${execution.network ?? "arc-testnet"}`,
-    };
-  }
-
-  const top = execution.results?.[0];
-  const walrusBlobId = (top?.walrus_blob_id as string | undefined) ?? null;
-  const composite = typeof top?.composite === "number" ? top.composite : vendor.composite;
-
-  return {
-    kind: "onchain_scores",
-    payee: null,
-    network: "arc-testnet",
-    priceUsdc: execution.priceUsdc,
-    walrusBlobId,
-    composite,
-    registryAddress,
-    summary: walrusBlobId
-      ? `Score manifest on Walrus (${walrusBlobId.slice(0, 12)}…) · composite ${(composite * 100).toFixed(0)}%`
-      : `Matched ${vendor.ensName} at composite ${(composite * 100).toFixed(0)}%`,
-  };
-}
+/** @deprecated alias */
+export const runExecutionStep = runMarketplaceLookup;
