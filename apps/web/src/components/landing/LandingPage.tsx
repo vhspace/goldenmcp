@@ -1,7 +1,10 @@
 import Link from "next/link";
+import { SponsorTracksSection } from "@/components/landing/SponsorTracksSection";
+import { HackathonVendorsSection } from "@/components/landing/HackathonVendorsSection";
+import { KeyComponentsSection } from "@/components/landing/KeyComponentsSection";
+import { WhyGoldenMcpSection } from "@/components/landing/WhyGoldenMcpSection";
 import {
   LANDING_CTA,
-  LANDING_FEATURES,
   LANDING_HERO,
   LANDING_NAV,
   LANDING_SECURITY,
@@ -61,17 +64,13 @@ export function LandingPage() {
           </p>
         </section>
 
-        <section id="features">
-          <h2 className={styles.sectionTitle}>Features</h2>
-          <div className={styles.featureGrid}>
-            {LANDING_FEATURES.map((feature) => (
-              <article key={feature.id} className={styles.featureCard}>
-                <h3>{feature.title}</h3>
-                <p>{feature.body}</p>
-              </article>
-            ))}
-          </div>
-        </section>
+        <KeyComponentsSection />
+
+        <WhyGoldenMcpSection />
+
+        <SponsorTracksSection />
+
+        <HackathonVendorsSection />
 
         <section id="security" className={styles.security}>
           <h3>{LANDING_SECURITY.title}</h3>
