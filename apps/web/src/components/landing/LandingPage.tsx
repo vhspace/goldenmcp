@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { HackathonVendorsSection } from "@/components/landing/HackathonVendorsSection";
 import { KeyComponentsSection } from "@/components/landing/KeyComponentsSection";
 import { WhyGoldenMcpSection } from "@/components/landing/WhyGoldenMcpSection";
 import {
@@ -65,6 +66,8 @@ export function LandingPage() {
         <KeyComponentsSection />
 
         <WhyGoldenMcpSection />
+
+        <HackathonVendorsSection />
 
         <section id="security" className={styles.security}>
           <h3>{LANDING_SECURITY.title}</h3>

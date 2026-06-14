@@ -659,6 +659,235 @@
   transform: translateY(-50%);
 }
 
+/* Hackathon vendors cross grid — GH #124 */
+.vendorsSection {
+  margin-top: 4rem;
+}
+
+.vendorsTitle {
+  margin: 0 0 0.75rem;
+  text-align: center;
+  font-size: clamp(1.75rem, 4vw, 2.25rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #f8fafc;
+}
+
+.vendorsLead {
+  margin: 0 auto 2rem;
+  max-width: 640px;
+  text-align: center;
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: #64748b;
+}
+
+.vendorsCrossWrap {
+  position: relative;
+  padding: 2px;
+  border-radius: 22px;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.45), rgba(45, 212, 191, 0.25));
+  box-shadow: 0 0 48px rgba(56, 189, 248, 0.08);
+}
+
+.vendorsCrossWrap::before,
+.vendorsCrossWrap::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  width: 80px;
+  height: 80px;
+  opacity: 0.25;
+  background-image: radial-gradient(circle, #64748b 1px, transparent 1px);
+  background-size: 8px 8px;
+  z-index: 0;
+}
+
+.vendorsCrossWrap::before {
+  top: 12px;
+  left: 12px;
+}
+
+.vendorsCrossWrap::after {
+  top: 12px;
+  right: 12px;
+}
+
+.vendorsCross {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto auto;
+  gap: 0;
+  border-radius: 20px;
+  background: rgba(6, 8, 12, 0.95);
+  overflow: hidden;
+}
+
+.vendorCell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 2.5rem 1.25rem 1.75rem;
+  min-height: 200px;
+}
+
+.vendorCell:nth-child(1),
+.vendorCell:nth-child(3) {
+  border-right: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+.vendorCell:nth-child(1),
+.vendorCell:nth-child(2) {
+  border-bottom: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+.vendorIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 0.85rem;
+  border-radius: 50%;
+  background: rgba(12, 16, 24, 0.9);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.15);
+}
+
+.vendorCell h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.vendorMeta {
+  margin: 0 0 0.65rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #38bdf8;
+}
+
+.vendorBody {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: #64748b;
+  max-width: 280px;
+}
+
+.vendorEns {
+  margin-top: 0.75rem;
+  font-size: 0.72rem;
+  font-family: ui-monospace, monospace;
+  color: #94a3b8;
+  text-decoration: none;
+}
+
+.vendorEns:hover {
+  color: #38bdf8;
+}
+
+.vendorsCenterHub {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 3;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 112px;
+  height: 112px;
+}
+
+.vendorsCenterRing {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.35) 0%, transparent 70%);
+  filter: blur(8px);
+}
+
+.vendorsCenterCore {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1rem;
+  width: 96px;
+  height: 96px;
+  padding: 0.5rem;
+  border-radius: 50%;
+  background: linear-gradient(145deg, rgba(14, 22, 36, 0.98), rgba(8, 12, 20, 0.98));
+  border: 2px solid rgba(56, 189, 248, 0.55);
+  box-shadow: 0 0 32px rgba(56, 189, 248, 0.25);
+  text-align: center;
+}
+
+.vendorsCenterCore .vendorIcon {
+  width: 32px;
+  height: 32px;
+  margin-bottom: 0.25rem;
+}
+
+.vendorsCenterCore strong {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  line-height: 1.2;
+}
+
+.vendorsCenterSub {
+  font-size: 0.58rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.vendorsCenterCap {
+  font-size: 0.55rem;
+  color: #64748b;
+}
+
+.vendorsCenterBlurb {
+  margin: 1.25rem auto 0;
+  max-width: 520px;
+  text-align: center;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: #64748b;
+}
+
+.vendorsFootnote {
+  margin: 1rem auto 0;
+  max-width: 560px;
+  text-align: center;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: #475569;
+}
+
+.vendorsFootnote a {
+  color: #38bdf8;
+  text-decoration: none;
+}
+
+.vendorsFootnote a:hover {
+  text-decoration: underline;
+}
+
+.vendorsCode {
+  font-size: 0.78em;
+  color: #94a3b8;
+}
+
 .security {
   margin-top: 2rem;
   padding: 1.5rem;
@@ -711,6 +940,21 @@
 
   .whySection {
     padding: 3rem 2rem;
+  }
+
+  .vendorCell {
+    padding: 3rem 1.75rem 2rem;
+    min-height: 220px;
+  }
+
+  .vendorsCenterHub {
+    width: 128px;
+    height: 128px;
+  }
+
+  .vendorsCenterCore {
+    width: 108px;
+    height: 108px;
   }
 }
 

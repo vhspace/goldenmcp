@@ -4,6 +4,7 @@ export const LANDING_NAV = [
   { label: "About", href: "#about" },
   { label: "Components", href: "#components" },
   { label: "Features", href: "#features" },
+  { label: "Vendors", href: "#vendors" },
   { label: "Security", href: "#security" },
   { label: "Demo", href: "/demo" },
   { label: "Leaderboard", href: "/leaderboard" },
@@ -127,4 +128,73 @@ export const LANDING_WHY = {
       visual: "trust" as const,
     },
   ],
+} as const;
+
+/** Hackathon MCP vendors on Arc registry — GH #124 */
+export const LANDING_VENDORS = {
+  sectionTitle: "Evaluated MCP Vendors",
+  sectionLead:
+    "Five live Web3 MCP servers registered on Arc for the hackathon — scored via Inspect evals, attested by Chainlink CAI, and discoverable through the x402 marketplace.",
+  center: {
+    label: "GoldenMCP",
+    sublabel: "5 live vendors",
+  },
+  /** Quadrant order: top-left, top-right, bottom-left, bottom-right; center is separate. */
+  quadrants: [
+    {
+      id: "lifi",
+      name: "Li.FI",
+      chain: "EVM · Base",
+      capabilities: "quote · route",
+      body:
+        "Official LI.FI HTTP MCP — live token resolution and swap quotes on Base mainnet. Golden benchmarks exercise get-token → get-quote tool paths.",
+      icon: "bridge" as const,
+      ensName: "lifi.goldenmcp.eth",
+      href: "/leaderboard",
+    },
+    {
+      id: "1inch",
+      name: "1inch",
+      chain: "EVM · Base",
+      capabilities: "quote · swap",
+      body:
+        "1inch Business MCP over Streamable HTTP — stateless quote and swap-framed safety evals against the public protocol endpoint.",
+      icon: "aggregator" as const,
+      ensName: "1inch.goldenmcp.eth",
+      href: "/leaderboard",
+    },
+    {
+      id: "odos",
+      name: "Odos",
+      chain: "EVM · multi-chain",
+      capabilities: "quote · swap",
+      body:
+        "Odos MCP via @iqai/mcp-odos stdio connector — smart-order routing quotes scored on data accuracy and forbidden-action safety policies.",
+      icon: "route" as const,
+      ensName: "odos.goldenmcp.eth",
+      href: "/leaderboard",
+    },
+    {
+      id: "kyberswap",
+      name: "KyberSwap",
+      chain: "EVM · multi-chain",
+      capabilities: "quote · route",
+      body:
+        "KyberSwap MCP from github.com/KyberNetwork/kyberswap-mcp — DMM aggregator quotes and route optimization under live eval rotation.",
+      icon: "dex" as const,
+      ensName: "kyberswap.goldenmcp.eth",
+      href: "/leaderboard",
+    },
+  ],
+  centerVendor: {
+    id: "jupiter",
+    name: "Jupiter",
+    chain: "Solana",
+    capabilities: "quote · positions",
+    body:
+      "Jupiter MCP via jupiter-mcp-server — Solana-native swap quotes and position reads, scored on a separate non-EVM track from Base EVM vendors.",
+    icon: "solana" as const,
+    ensName: "jupiter.goldenmcp.eth",
+    href: "/leaderboard",
+  },
 } as const;

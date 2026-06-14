@@ -5,6 +5,7 @@ import {
   LANDING_HERO,
   LANDING_KEY_COMPONENTS,
   LANDING_NAV,
+  LANDING_VENDORS,
   LANDING_WHY,
 } from "../src/lib/landing-content";
 
@@ -69,5 +70,28 @@ describe("landing why section (GH #124)", () => {
 
   test("nav includes features anchor", () => {
     expect(LANDING_NAV.some((l) => l.href === "#features")).toBe(true);
+  });
+});
+
+describe("landing hackathon vendors (GH #124)", () => {
+  test("lists five registered hackathon MCPs", () => {
+    const ids = [
+      ...LANDING_VENDORS.quadrants.map((v) => v.id),
+      LANDING_VENDORS.centerVendor.id,
+    ];
+    expect(ids.sort()).toEqual(["1inch", "jupiter", "kyberswap", "lifi", "odos"]);
+  });
+
+  test("vendor copy references live eval stack", () => {
+    const text = [
+      LANDING_VENDORS.sectionLead,
+      ...LANDING_VENDORS.quadrants.map((v) => v.body),
+      LANDING_VENDORS.centerVendor.body,
+    ].join(" ");
+    expect(text).toMatch(/Arc|Inspect|Chainlink|x402|MCP/i);
+  });
+
+  test("nav includes vendors anchor", () => {
+    expect(LANDING_NAV.some((l) => l.href === "#vendors")).toBe(true);
   });
 });
