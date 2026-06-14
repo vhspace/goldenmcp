@@ -411,8 +411,10 @@ export function caiReviewPrompt(): string {
 /**
  * Submit a score manifest to the CAI TEE for attestation and return the
  * inference id. When `callbackUrl` is set, CAI POSTs `{input: <status>}` to it
- * once on completion (the async path — the workflow does not poll). The CAI
- * status has no run_id, so callers encode it in the callback URL query string.
+ * once on completion (the async path — the workflow does not poll). The CRE
+ * HTTP-trigger payload has no URL/query and the CAI status has no run_id, so
+ * handler A registers the inference_id -> run_id map with the eval-runner
+ * (registerCaiSubmitted) instead; handler B resolves it from the inference id.
  */
 export function submitCaiInference(
   runtime: Runtime<Config>,
