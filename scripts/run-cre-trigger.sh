@@ -3,7 +3,7 @@
 # port 2000 (path /trigger) so the Confidential AI Attester's cre_callback can
 # reach handler B directly (GH #54). Requires cre CLI >= 1.19.0.
 #
-# On the demo droplet (159.203.78.85) run this under tmux/systemd so the trigger
+# On the demo droplet (165.227.74.149) run this under tmux/systemd so the trigger
 # stays up; CAI posts the completed inference to http://<ip>:2000/trigger. The
 # droplet firewall must allow inbound :2000.
 #

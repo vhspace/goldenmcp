@@ -1,9 +1,9 @@
 {
   "schedule": "0 */6 * * *",
-  "evalRunnerUrl": "http://159.203.78.85",
+  "evalRunnerUrl": "http://165.227.74.149",
   "evalRunnerApiKey": "",
   "chainlinkCaiUrl": "https://confidential-ai-dev-preview.cldev.cloud",
-  "creCallbackUrl": "http://159.203.78.85:2000/trigger",
+  "creCallbackUrl": "http://165.227.74.149:2000/trigger",
   "authorizedKeys": [],
   "walrusAggregatorUrl": "https://aggregator.walrus-testnet.walrus.space",
   "arcRegistryAddress": "0xae264f008b37570cc6b22552f623b7e8c73d8123",
