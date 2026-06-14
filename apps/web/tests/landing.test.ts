@@ -5,6 +5,7 @@ import {
   LANDING_HERO,
   LANDING_KEY_COMPONENTS,
   LANDING_NAV,
+  LANDING_SPONSOR_TRACKS,
   LANDING_VENDORS,
   LANDING_WHY,
 } from "../src/lib/landing-content";
@@ -93,5 +94,34 @@ describe("landing hackathon vendors (GH #124)", () => {
 
   test("nav includes vendors anchor", () => {
     expect(LANDING_NAV.some((l) => l.href === "#vendors")).toBe(true);
+  });
+});
+
+describe("landing sponsor tracks (GH #124)", () => {
+  test("lists four hackathon tracks", () => {
+    expect(LANDING_SPONSOR_TRACKS.tracks.length).toBe(4);
+    const ids = LANDING_SPONSOR_TRACKS.tracks.map((t) => t.id);
+    expect(ids).toEqual(["ens", "chainlink", "arc", "ethglobal"]);
+  });
+
+  test("copy names real bounty integrations", () => {
+    const text = [
+      LANDING_SPONSOR_TRACKS.sectionLead,
+      ...LANDING_SPONSOR_TRACKS.tracks.map((t) => `${t.name} ${t.integration}`),
+    ].join(" ");
+    expect(text).toMatch(/ENS|Chainlink|Arc|ETHGlobal|CAI|x402|ENSIP/i);
+  });
+
+  test("tracks link to sponsor sites", () => {
+    for (const track of LANDING_SPONSOR_TRACKS.tracks) {
+      expect(track.href).toMatch(/^https:\/\//);
+      expect(track.logoSrc).toMatch(/^\/images\/sponsors\/.+\.svg$/);
+    }
+    expect(LANDING_SPONSOR_TRACKS.tracks.find((t) => t.id === "ens")?.href).toBe("https://ens.domains");
+    expect(LANDING_SPONSOR_TRACKS.tracks.find((t) => t.id === "ethglobal")?.href).toContain("ethglobal.com");
+  });
+
+  test("nav includes tracks anchor", () => {
+    expect(LANDING_NAV.some((l) => l.href === "#tracks")).toBe(true);
   });
 });

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SponsorTracksSection } from "@/components/landing/SponsorTracksSection";
 import { HackathonVendorsSection } from "@/components/landing/HackathonVendorsSection";
 import { KeyComponentsSection } from "@/components/landing/KeyComponentsSection";
 import { WhyGoldenMcpSection } from "@/components/landing/WhyGoldenMcpSection";
@@ -66,6 +67,8 @@ export function LandingPage() {
         <KeyComponentsSection />
 
         <WhyGoldenMcpSection />
+
+        <SponsorTracksSection />
 
         <HackathonVendorsSection />
 

@@ -4,6 +4,22 @@
   overflow: hidden;
   background: #060608;
   color: #e8eaef;
+  font-family: var(--font-funnel-sans), system-ui, sans-serif;
+}
+
+.page :is(
+  h1,
+  h2,
+  h3,
+  h4,
+  .brand,
+  .navCta,
+  .primaryBtn,
+  .secondaryBtn,
+  .trackName,
+  .trackCta
+) {
+  font-family: var(--font-funnel-display), var(--font-funnel-sans), system-ui, sans-serif;
 }
 
 .glow {
@@ -888,6 +904,180 @@
   color: #94a3b8;
 }
 
+/* Sponsor tracks row — GH #124 */
+.tracksSection {
+  margin-top: 4rem;
+  padding: 3rem 1.5rem;
+  border-radius: 20px;
+  text-align: center;
+  background: linear-gradient(
+    165deg,
+    rgba(197, 160, 89, 0.14) 0%,
+    rgba(24, 20, 14, 0.92) 45%,
+    rgba(10, 12, 18, 0.88) 100%
+  );
+  border: 1px solid rgba(197, 160, 89, 0.32);
+  box-shadow:
+    0 0 48px rgba(197, 160, 89, 0.1),
+    inset 0 1px 0 rgba(232, 213, 176, 0.08);
+}
+
+.tracksTitle {
+  margin: 0 0 0.85rem;
+  font-size: clamp(1.1rem, 2.5vw, 1.35rem);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #e8d5b0;
+}
+
+.tracksLead {
+  margin: 0 auto 2.25rem;
+  max-width: 520px;
+  font-size: 0.9rem;
+  line-height: 1.65;
+  color: #a8906a;
+}
+
+.tracksRow {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
+}
+
+.tracksRow > li {
+  min-width: 0;
+}
+
+.trackLink {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 168px;
+  padding: 0;
+  border-radius: 16px;
+  text-decoration: none;
+  overflow: hidden;
+  background: rgba(197, 160, 89, 0.07);
+  border: 1px solid rgba(197, 160, 89, 0.28);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.22);
+  transition:
+    transform 0.28s cubic-bezier(0.34, 1.35, 0.64, 1),
+    border-color 0.22s ease,
+    box-shadow 0.28s ease,
+    background 0.22s ease;
+}
+
+.trackLink:hover {
+  transform: translateY(-5px);
+  background: linear-gradient(
+    155deg,
+    rgba(49, 46, 129, 0.94) 0%,
+    rgba(30, 27, 75, 0.97) 55%,
+    rgba(15, 23, 42, 0.98) 100%
+  );
+  border-color: rgba(167, 139, 250, 0.55);
+  box-shadow:
+    0 16px 44px rgba(76, 29, 149, 0.32),
+    inset 0 1px 0 rgba(196, 181, 253, 0.14);
+}
+
+.trackLink:focus-visible {
+  outline: 2px solid #a78bfa;
+  outline-offset: 3px;
+}
+
+.trackLogoWell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 72px;
+  padding: 1.1rem 1.25rem 0.85rem;
+  background: rgba(0, 0, 0, 0.18);
+  border-bottom: 1px solid rgba(197, 160, 89, 0.15);
+}
+
+.trackLink:hover .trackLogoWell {
+  background: rgba(15, 10, 40, 0.45);
+  border-bottom-color: rgba(167, 139, 250, 0.22);
+}
+
+.trackLogoImg {
+  width: auto !important;
+  height: auto !important;
+  max-height: 36px;
+  max-width: 130px;
+  object-fit: contain;
+  filter: sepia(0.35) saturate(0.75) brightness(1.05);
+  transition:
+    filter 0.28s ease,
+    transform 0.28s cubic-bezier(0.34, 1.35, 0.64, 1);
+}
+
+.trackLink:hover .trackLogoImg {
+  filter: none;
+  transform: scale(1.05);
+}
+
+.trackBody {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.85rem 1rem 1rem;
+  text-align: center;
+}
+
+.trackName {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #d4b87a;
+  transition: color 0.22s ease;
+}
+
+.trackLink:hover .trackName {
+  color: #ede9fe;
+}
+
+.trackIntegration {
+  flex: 1;
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.45;
+  color: #8a7350;
+  max-width: 200px;
+  transition: color 0.22s ease;
+}
+
+.trackLink:hover .trackIntegration {
+  color: #c4b5fd;
+}
+
+.trackCta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.25rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #a8906a;
+  transition: color 0.22s ease, gap 0.22s ease;
+}
+
+.trackLink:hover .trackCta {
+  color: #a78bfa;
+  gap: 0.45rem;
+}
+
 .security {
   margin-top: 2rem;
   padding: 1.5rem;
@@ -942,6 +1132,11 @@
     padding: 3rem 2rem;
   }
 
+  .tracksRow {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.15rem;
+  }
+
   .vendorCell {
     padding: 3rem 1.75rem 2rem;
     min-height: 220px;
@@ -955,6 +1150,13 @@
   .vendorsCenterCore {
     width: 108px;
     height: 108px;
+  }
+}
+
+@media (min-width: 640px) and (max-width: 899px) {
+  .tracksRow {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
   }
 }
 
