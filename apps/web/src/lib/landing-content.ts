@@ -2,6 +2,7 @@
 
 export const LANDING_NAV = [
   { label: "About", href: "#about" },
+  { label: "Components", href: "#components" },
   { label: "Features", href: "#features" },
   { label: "Security", href: "#security" },
   { label: "Demo", href: "/demo" },
@@ -43,3 +44,87 @@ export const LANDING_SECURITY = {
   title: "Secured via Hardware TEE",
   body: "Chainlink Confidential AI attests eval manifests in Gemma sandbox — inference IDs and transcript hashes land on-chain.",
 };
+
+/** Vertex-style key components — GH #124 */
+export const LANDING_KEY_COMPONENTS = {
+  sectionTitle: "Platform Key Components",
+  hero: {
+    title: "GoldenMCP Evaluation Layer",
+    body:
+      "At the heart of the marketplace is the GoldenMCP evaluation layer — a live scoring ledger for Web3 MCP servers. " +
+      "Inspect evals against real endpoints produce K=3 Golden Scores; manifests land on Walrus, attestations and capability " +
+      "scores sync to Arc, and ENS records bind identity to proven quality.",
+    subPanels: [
+      {
+        id: "walrus",
+        title: "Walrus Storage",
+        body:
+          "Score manifests and raw Inspect .eval logs publish to Walrus testnet. Registry entries and ENS text records point at walrus:// blob IDs — no substituted fixtures at runtime.",
+      },
+      {
+        id: "arc",
+        title: "Arc Registry",
+        body:
+          "MCPRegistry on Arc testnet stores composite capability scores, attestation inference IDs, and transcript hashes. USDC is native gas — the same chain settles x402 marketplace payments.",
+      },
+    ],
+  },
+  cards: [
+    {
+      id: "inspect",
+      title: "Inspect AI Evals",
+      body:
+        "K=3 model ensemble scores live MCP tool paths on data accuracy, path correctness, and token efficiency. Benchmarks target Li.FI, 1inch, and other Web3 MCPs with real HTTP connectors — not mocks.",
+      icon: "inspect" as const,
+    },
+    {
+      id: "cai",
+      title: "Chainlink CRE + CAI",
+      body:
+        "The CRE workflow orchestrates eval-runner, Walrus upload, and onchain writes. Confidential AI attests manifests in a hardware TEE — inference IDs and response digests become the on-chain proof.",
+      icon: "cai" as const,
+    },
+    {
+      id: "x402",
+      title: "x402 USDC Marketplace",
+      body:
+        "Marketplace lookup returns HTTP 402 until Circle USDC micropayment settles on Arc. Agents pay for proven Golden Score tiers and receive ENS-verified MCP endpoints ranked by capability.",
+      icon: "x402" as const,
+    },
+  ],
+} as const;
+
+/** "Why GoldenMCP?" bento feature grid — GH #124 */
+export const LANDING_WHY = {
+  sectionTitle: "Why GoldenMCP?",
+  cards: [
+    {
+      id: "scores",
+      title: "Live Golden Scores",
+      body:
+        "Rank Li.FI, 1inch, and other Web3 MCPs by composite K=3 scores from real Inspect evals — data accuracy, tool path, and token efficiency measured against live endpoints.",
+      visual: "scores" as const,
+    },
+    {
+      id: "pricing",
+      title: "Pay-for-Quality Lookup",
+      body:
+        "x402 micropayments gate marketplace discovery — agents pay USDC on Arc only when they need a proven vendor, with price tiers tied to minimum Golden Score thresholds.",
+      visual: "pricing" as const,
+    },
+    {
+      id: "coverage",
+      title: "Unified MCP Discovery",
+      body:
+        "One marketplace spans swap, quote, route, and trade capabilities across EVM and Solana MCPs. ENS subnames and Arc registry records tie each vendor to Walrus eval evidence.",
+      visual: "coverage" as const,
+    },
+    {
+      id: "trust",
+      title: "TEE-Attested Trust",
+      body:
+        "Chainlink Confidential AI attests score manifests in hardware TEE. Inference IDs and transcript hashes land on Arc — judges and agents verify quality without trusting a central operator.",
+      visual: "trust" as const,
+    },
+  ],
+} as const;
