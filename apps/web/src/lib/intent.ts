@@ -16,14 +16,6 @@ export interface DemoPrompt {
   text: string;
 }
 
-/** Pre-baked judge prompts — parsing derives fields from `text`, not from this metadata. */
-export const DEMO_PROMPTS: DemoPrompt[] = [
-  {
-    id: "eth-quote",
-    text: "Get best ETH/USDC quote with min reliability ≥ 0.15",
-  },
-];
-
 /** Concierge chat quick prompts — quote flows that work today (registry has quote capability only). */
 export const CHAT_DEMO_PROMPTS: DemoPrompt[] = [
   {
@@ -32,7 +24,7 @@ export const CHAT_DEMO_PROMPTS: DemoPrompt[] = [
   },
   {
     id: "marketplace-quote",
-    text: "Find the best quote MCP for ETH/USDC with min reliability 0.15, then quote 0.001 ETH to USDC on the winner.",
+    text: "Find the best quote MCP for ETH/USDC with min reliability 0.15, then quote 0.001 ETH to USDC on Base via LI.FI.",
   },
   {
     id: "probe-lifi",
